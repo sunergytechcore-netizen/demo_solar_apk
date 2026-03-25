@@ -23,6 +23,8 @@ import AllLeadsScreen      from './src/screen/Allleadsscreen';
 import AttendanceScreen    from './src/screen/Attendancescreen';
 import LocationVisitScreen from './src/screen/Locationvisitscreen';
 import LeadFunnelScreen    from './src/screen/LeadFunnelScreen';
+import TotalVisitsScreen   from './src/screen/TotalVisitsScreen';
+import RegistrationScreen  from './src/screen/Registrationscreen';
 
 // ── Components ────────────────────────────────────────────────────────────────
 import Sidebar           from './src/components/Sidebar';
@@ -34,6 +36,14 @@ import TimePeriodModal   from './src/components/TimePeriodModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SubScreen = null | 'createLead';
+
+type TabId =
+  | 'home'
+  | 'allLeads'
+  | 'attendance'
+  | 'locationVisit'
+  | 'totalVisits'
+  | 'actions';
 
 interface UserData {
   name?:     string;
@@ -56,7 +66,7 @@ function AppInner() {
 
   // ── Navigation state ──────────────────────────────────────────────────────
   const [activeMenu, setActiveMenu] = useState('dashboard');
-  const [activeTab,  setActiveTab]  = useState('home');
+  const [activeTab,  setActiveTab]  = useState<TabId>('home');
   const [subScreen,  setSubScreen]  = useState<SubScreen>(null);
 
   // ── Modal states ──────────────────────────────────────────────────────────
@@ -69,8 +79,6 @@ function AppInner() {
 
   // ── Boot: just stop the splash — AuthContext restores session internally ──
   useEffect(() => {
-    // AuthContext's useEffect already re-hydrates user from MemStore.
-    // We only need to stop showing the splash after a short tick.
     const timer = setTimeout(() => setAuthLoading(false), 300);
     return () => clearTimeout(timer);
   }, []);
@@ -84,7 +92,6 @@ function AppInner() {
 
   // ── Logout handler ────────────────────────────────────────────────────────
   const handleLogout = () => {
-    // AuthContext.logout() clears MemStore — called from ProfileDropdown
     setProfileOpen(false);
     setCurrentUser(null);
     setIsLoggedIn(false);
@@ -106,7 +113,7 @@ function AppInner() {
     if (id === 'actions') {
       setQuickActionsOpen(true);
     } else {
-      setActiveTab(id);
+      setActiveTab(id as TabId);
     }
   };
 
@@ -147,19 +154,21 @@ function AppInner() {
   /* ── Tab screen renderer ─────────────────────────────────────────────────── */
   const renderTabScreen = () => {
     switch (activeTab) {
+
       case 'home':
         return (
           <HomeScreen
             {...commonHandlers}
             onFilterPress={() => setTimePeriodOpen(true)}
             selectedPeriod={selectedPeriod}
-            onViewVisits={()           => setActiveTab('allLeads')}
-            onViewRegistrations={()    => setActiveTab('allLeads')}
-            onViewMissedLeads={()      => setActiveTab('allLeads')}
-            onViewAttendance={()       => setActiveTab('attendance')}
-            onViewLocationVisit={()    => setActiveTab('locationVisit')}
+            onViewVisits={()            => setActiveTab('totalVisits')}
+            onViewRegistrations={()     => setActiveTab('registration')}
+            onViewMissedLeads={()       => setActiveTab('allLeads')}
+            onViewAttendance={()        => setActiveTab('attendance')}
+            onViewLocationVisit={()     => setActiveTab('locationVisit')}
           />
         );
+
       case 'allLeads':
         return (
           <AllLeadsScreen
@@ -167,6 +176,7 @@ function AppInner() {
             onAddLead={() => setSubScreen('createLead')}
           />
         );
+
       case 'attendance':
         return (
           <AttendanceScreen
@@ -174,6 +184,7 @@ function AppInner() {
             onBackPress={() => setActiveTab('home')}
           />
         );
+
       case 'locationVisit':
         return (
           <LocationVisitScreen
@@ -181,6 +192,17 @@ function AppInner() {
             onBackPress={() => setActiveTab('home')}
           />
         );
+
+      case 'totalVisits':
+        return (
+          <TotalVisitsScreen
+            {...commonHandlers}
+            onBackPress={() => setActiveTab('home')}
+          />
+        );
+
+     
+
       default:
         return (
           <HomeScreen
@@ -195,8 +217,32 @@ function AppInner() {
   /* ── Menu screen renderer ────────────────────────────────────────────────── */
   const renderMenuScreen = () => {
     switch (activeMenu) {
+
       case 'leadFunnel':
         return <LeadFunnelScreen {...commonHandlers} />;
+
+      case 'totalVisits':
+        return (
+          <TotalVisitsScreen
+            {...commonHandlers}
+            onBackPress={() => {
+              setActiveMenu('dashboard');
+              setActiveTab('home');
+            }}
+          />
+        );
+
+      case 'registration':
+        return (
+          <RegistrationScreen
+            {...commonHandlers}
+            onBackPress={() => {
+              setActiveMenu('dashboard');
+              setActiveTab('home');
+            }}
+          />
+        );
+
       default:
         return null;
     }
@@ -240,10 +286,7 @@ function AppInner() {
         <MaterialCommunityIcons name="menu" size={26} color="#fff" />
       </TouchableOpacity>
 
-      {/* Bottom tab bar */}
-      {onDashboard && (
-        <BottomTabBar activeTab={activeTab} onTabPress={handleTabPress} />
-      )}
+
 
       {/* ── Modals ── */}
       <Sidebar

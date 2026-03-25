@@ -115,7 +115,7 @@ const StageItem = ({ stage, config, isSelected, onPress, count, percentage }: an
     activeOpacity={0.75}
     style={[
       si.wrap,
-      { borderColor: isSelected ? config.color : 'transparent', backgroundColor: isSelected ? alpha(config.color, 0.06) : '#fff' },
+      { borderColor: isSelected ? config.color : 'transparent',backgroundColor: '#fff',},
     ]}
   >
     <View style={[si.iconCircle, { backgroundColor: config.color }]}>
