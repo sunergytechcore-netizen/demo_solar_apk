@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import TopBar from '../components/TopBar';
+import { useAuth } from '../contexts/AuthContext';
+
 
 // ─── Form Field Component ─────────────────────────────────────────────────────
 interface FieldProps {
@@ -99,18 +101,53 @@ const CreateLeadScreen: React.FC<CreateLeadScreenProps> = ({
   const [zone,        setZone]        = useState('');
   const [notes,       setNotes]       = useState('');
 
-  const handleCreate = () => {
-    if (!firstName.trim()) {
-      Alert.alert('Required', 'Please enter the first name.');
-      return;
-    }
-    if (!phone.trim()) {
-      Alert.alert('Required', 'Please enter the phone number.');
-      return;
-    }
-    Alert.alert('Success', 'Lead created successfully!');
-  };
+  const { fetchAPI, user } = useAuth();
+const handleCreate = async () => {
+  if (!firstName.trim()) {
+    Alert.alert('Required', 'Please enter the first name.');
+    return;
+  }
 
+  if (!phone.trim()) {
+    Alert.alert('Required', 'Please enter the phone number.');
+    return;
+  }
+
+  try {
+    const payload = {
+      firstName,
+      lastName,
+      email,
+      phone,
+      consumerNumber: consumerNum,
+      address: {
+        street,
+        city,
+        state,
+        postalCode,
+        zone,
+      },
+      notes,
+    };
+
+    const res = await fetchAPI('/lead/create', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    // Adjust based on your backend response structure
+    if (res?.success || res?.status === 'success') {
+      Alert.alert('Success', 'Lead created successfully!');
+      handleReset();
+      onBack(); // optional navigation
+    } else {
+      Alert.alert('Error', res?.message || 'Failed to create lead');
+    }
+
+  } catch (error: any) {
+    Alert.alert('Error', error.message || 'Something went wrong');
+  }
+};
   const handleReset = () => {
     setFirstName(''); setLastName(''); setEmail(''); setPhone('');
     setConsumerNum(''); setStreet(''); setCity(''); setState('');
