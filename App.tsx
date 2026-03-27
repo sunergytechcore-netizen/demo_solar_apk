@@ -1,5 +1,5 @@
 // App.tsx
-// ─── No AsyncStorage import needed here — AuthContext handles all storage ──────
+// ─── BottomTabBar shown ONLY when onDashboard === true ───────────────────────
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -12,19 +12,21 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
-// ── Context ────────────────────────────────────────────────────────────────────
+// ── Context ───────────────────────────────────────────────────────────────────
 import { AuthProvider } from './src/contexts/AuthContext';
 
 // ── Screens ───────────────────────────────────────────────────────────────────
-import LoginScreen         from './src/screen/LoginScreen';
-import HomeScreen          from './src/screen/HomeScreen';
-import CreateLeadScreen    from './src/screen/CreateLeadScreen';
-import AllLeadsScreen      from './src/screen/Allleadsscreen';
-import AttendanceScreen    from './src/screen/Attendancescreen';
-import LocationVisitScreen from './src/screen/Locationvisitscreen';
-import LeadFunnelScreen    from './src/screen/LeadFunnelScreen';
-import TotalVisitsScreen   from './src/screen/TotalVisitsScreen';
-import RegistrationScreen  from './src/screen/Registrationscreen';
+import LoginScreen              from './src/screen/LoginScreen';
+import HomeScreen               from './src/screen/HomeScreen';
+import CreateLeadScreen         from './src/screen/CreateLeadScreen';
+import AllLeadsScreen           from './src/screen/Allleadsscreen';
+import AttendanceScreen         from './src/screen/Attendancescreen';
+import LocationVisitScreen      from './src/screen/Locationvisitscreen';
+import LeadFunnelScreen         from './src/screen/LeadFunnelScreen';
+import TotalVisitsScreen        from './src/screen/TotalVisitsScreen';
+import RegistrationScreen       from './src/screen/Registrationscreen';
+
+ // ← fixed: screen/, not components/
 
 // ── Components ────────────────────────────────────────────────────────────────
 import Sidebar           from './src/components/Sidebar';
@@ -33,6 +35,9 @@ import QuickActionsModal from './src/components/QuickActionsModal';
 import ProfileDropdown   from './src/components/ProfileDropdown';
 import SearchModal       from './src/components/SearchModal';
 import TimePeriodModal   from './src/components/TimePeriodModal';
+import DocumentSubmissionPage from './src/components/Documentsubmissionscreen';
+import BankLoanPendingScreen from './src/screen/BankLoanPendingScreen';
+import BankLoanApplyScreen from './src/screen/BankLoanApplyScreen';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SubScreen = null | 'createLead';
@@ -44,6 +49,16 @@ type TabId =
   | 'locationVisit'
   | 'totalVisits'
   | 'actions';
+
+type MenuId =
+  | 'dashboard'
+  | 'leadFunnel'
+  | 'totalVisits'
+  | 'registration'
+  | 'bankLoan'
+  | 'document'     // ← added to union
+  |'loanPending'
+  | string;
 
 interface UserData {
   name?:     string;
@@ -59,17 +74,17 @@ interface UserData {
 ───────────────────────────────────────────────────────────── */
 function AppInner() {
 
-  // ── Auth state ────────────────────────────────────────────────────────────
-  const [isLoggedIn,   setIsLoggedIn]   = useState(false);
-  const [currentUser,  setCurrentUser]  = useState<UserData | null>(null);
-  const [authLoading,  setAuthLoading]  = useState(true);
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [isLoggedIn,  setIsLoggedIn]  = useState(false);
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
-  // ── Navigation state ──────────────────────────────────────────────────────
-  const [activeMenu, setActiveMenu] = useState('dashboard');
+  // ── Navigation ────────────────────────────────────────────────────────────
+  const [activeMenu, setActiveMenu] = useState<MenuId>('dashboard');
   const [activeTab,  setActiveTab]  = useState<TabId>('home');
   const [subScreen,  setSubScreen]  = useState<SubScreen>(null);
 
-  // ── Modal states ──────────────────────────────────────────────────────────
+  // ── Modals ────────────────────────────────────────────────────────────────
   const [sidebarOpen,      setSidebarOpen]      = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [profileOpen,      setProfileOpen]      = useState(false);
@@ -77,20 +92,19 @@ function AppInner() {
   const [timePeriodOpen,   setTimePeriodOpen]   = useState(false);
   const [selectedPeriod,   setSelectedPeriod]   = useState('today');
 
-  // ── Boot: just stop the splash — AuthContext restores session internally ──
+  // ── Boot ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const timer = setTimeout(() => setAuthLoading(false), 300);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => setAuthLoading(false), 300);
+    return () => clearTimeout(t);
   }, []);
 
-  // ── Login success handler ─────────────────────────────────────────────────
+  // ── Auth handlers ─────────────────────────────────────────────────────────
   const handleLoginSuccess = (userData: UserData) => {
     setCurrentUser(userData);
     setIsLoggedIn(true);
     setActiveTab(userData.role === 'TEAM' ? 'attendance' : 'home');
   };
 
-  // ── Logout handler ────────────────────────────────────────────────────────
   const handleLogout = () => {
     setProfileOpen(false);
     setCurrentUser(null);
@@ -98,6 +112,12 @@ function AppInner() {
     setActiveMenu('dashboard');
     setActiveTab('home');
     setSubScreen(null);
+  };
+
+  // ── Navigation helpers ────────────────────────────────────────────────────
+  const backToDashboard = () => {
+    setActiveMenu('dashboard');
+    setActiveTab('home');
   };
 
   const onDashboard = activeMenu === 'dashboard';
@@ -119,12 +139,12 @@ function AppInner() {
 
   const handleMenuSelect = (id: string) => {
     setSubScreen(null);
-    setActiveMenu(id);
+    setActiveMenu(id as MenuId);
     if (id === 'dashboard') setActiveTab('home');
     setSidebarOpen(false);
   };
 
-  /* ── Loading splash ──────────────────────────────────────────────────────── */
+  /* ── Splash ──────────────────────────────────────────────────────────────── */
   if (authLoading) {
     return (
       <View style={styles.splash}>
@@ -133,12 +153,12 @@ function AppInner() {
     );
   }
 
-  /* ── Login screen ────────────────────────────────────────────────────────── */
+  /* ── Login ───────────────────────────────────────────────────────────────── */
   if (!isLoggedIn) {
     return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
-  /* ── Sub-screen renderer ─────────────────────────────────────────────────── */
+  /* ── Sub-screen ──────────────────────────────────────────────────────────── */
   const renderSubScreen = () => {
     if (subScreen === 'createLead') {
       return (
@@ -151,24 +171,25 @@ function AppInner() {
     return null;
   };
 
-  /* ── Tab screen renderer ─────────────────────────────────────────────────── */
+  /* ── Tab screens ─────────────────────────────────────────────────────────── */
   const renderTabScreen = () => {
     switch (activeTab) {
-
       case 'home':
         return (
           <HomeScreen
             {...commonHandlers}
             onFilterPress={() => setTimePeriodOpen(true)}
             selectedPeriod={selectedPeriod}
-            onViewVisits={()            => setActiveTab('totalVisits')}
-            onViewRegistrations={()     => setActiveTab('registration')}
-            onViewMissedLeads={()       => setActiveTab('allLeads')}
-            onViewAttendance={()        => setActiveTab('attendance')}
-            onViewLocationVisit={()     => setActiveTab('locationVisit')}
+            onViewVisits={()          => setActiveTab('totalVisits')}
+            onViewRegistrations={()   => setActiveMenu('registration')}
+            onViewMissedLeads={()     => setActiveTab('allLeads')}
+            onViewAttendance={()      => setActiveTab('attendance')}
+            onViewLocationVisit={()   => setActiveTab('locationVisit')}
+            onViewBankLoans={()       => setActiveMenu('bankLoan')}
+            onViewDocuments={()       => setActiveMenu('document')} // ← optional shortcut
+            onViewLocanPending={()       => setActiveMenu('loanPending')} // ← optional shortcut
           />
         );
-
       case 'allLeads':
         return (
           <AllLeadsScreen
@@ -176,7 +197,6 @@ function AppInner() {
             onAddLead={() => setSubScreen('createLead')}
           />
         );
-
       case 'attendance':
         return (
           <AttendanceScreen
@@ -184,7 +204,6 @@ function AppInner() {
             onBackPress={() => setActiveTab('home')}
           />
         );
-
       case 'locationVisit':
         return (
           <LocationVisitScreen
@@ -192,7 +211,6 @@ function AppInner() {
             onBackPress={() => setActiveTab('home')}
           />
         );
-
       case 'totalVisits':
         return (
           <TotalVisitsScreen
@@ -200,9 +218,6 @@ function AppInner() {
             onBackPress={() => setActiveTab('home')}
           />
         );
-
-     
-
       default:
         return (
           <HomeScreen
@@ -214,7 +229,7 @@ function AppInner() {
     }
   };
 
-  /* ── Menu screen renderer ────────────────────────────────────────────────── */
+  /* ── Menu screens ────────────────────────────────────────────────────────── */
   const renderMenuScreen = () => {
     switch (activeMenu) {
 
@@ -225,10 +240,7 @@ function AppInner() {
         return (
           <TotalVisitsScreen
             {...commonHandlers}
-            onBackPress={() => {
-              setActiveMenu('dashboard');
-              setActiveTab('home');
-            }}
+            onBackPress={backToDashboard}
           />
         );
 
@@ -236,19 +248,42 @@ function AppInner() {
         return (
           <RegistrationScreen
             {...commonHandlers}
-            onBackPress={() => {
-              setActiveMenu('dashboard');
-              setActiveTab('home');
-            }}
+            onBackPress={backToDashboard}
           />
         );
+
+      case 'loanPending':
+        return (
+          <BankLoanPendingScreen
+            {...commonHandlers}
+            onBackPress={backToDashboard}
+          />
+        );
+
+      // ── Document Submission ────────────────────────────────────────────────
+      case 'document':
+        return (
+          <DocumentSubmissionPage 
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        );
+
+        case 'bankLoan':
+        return (
+          <BankLoanApplyScreen 
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        );
+      // ───────────────────────────────────────────────────────────────────────
 
       default:
         return null;
     }
   };
 
-  /* ── User initials helper ────────────────────────────────────────────────── */
+  /* ── Initials ────────────────────────────────────────────────────────────── */
   const getInitials = () => {
     if (!currentUser?.name) return 'U';
     return currentUser.name
@@ -264,31 +299,58 @@ function AppInner() {
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor="#f0f4ff" />
 
-      <View style={styles.screenArea}>
-        {onDashboard ? (
-          <>
-            <View style={styles.fill}>{renderTabScreen()}</View>
-            {subScreen !== null && (
-              <View style={styles.subScreenOverlay}>{renderSubScreen()}</View>
-            )}
-          </>
-        ) : (
-          renderMenuScreen()
-        )}
-      </View>
+      {onDashboard ? (
+        /*
+         * ╔══════════════════════════╗
+         * ║  Tab screen  (flex: 1)   ║
+         * ║  SubScreen overlay (abs) ║
+         * ╠══════════════════════════╣
+         * ║  BottomTabBar            ║  ← ONLY on dashboard
+         * ╚══════════════════════════╝
+         */
+        <View style={styles.dashboardLayout}>
 
-      {/* FAB */}
+          <View style={styles.fill}>
+            {renderTabScreen()}
+
+            {subScreen !== null && (
+              <View style={styles.subScreenOverlay}>
+                {renderSubScreen()}
+              </View>
+            )}
+          </View>
+
+          <BottomTabBar
+            activeTab={activeTab}
+            onTabPress={handleTabPress}
+          />
+
+        </View>
+      ) : (
+        /*
+         * ╔══════════════════════════╗
+         * ║  Menu screen (flex: 1)   ║  ← full screen, no bottom bar
+         * ╚══════════════════════════╝
+         */
+        <View style={styles.fill}>
+          {renderMenuScreen()}
+        </View>
+      )}
+
+      {/*
+       * FAB — always floats.
+       *   onDashboard → bottom: 80  (clears ~64px tab bar + gap)
+       *   menu screen → bottom: 24
+       */}
       <TouchableOpacity
-        style={styles.fab}
+        style={[styles.fab, { bottom: onDashboard ? 80 : 24 }]}
         activeOpacity={0.85}
         onPress={() => setSidebarOpen(true)}
       >
         <MaterialCommunityIcons name="menu" size={26} color="#fff" />
       </TouchableOpacity>
 
-
-
-      {/* ── Modals ── */}
+      {/* ── Global modals ── */}
       <Sidebar
         visible={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -333,7 +395,7 @@ function AppInner() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   ROOT EXPORT  — wraps everything in AuthProvider
+   ROOT EXPORT
 ───────────────────────────────────────────────────────────── */
 export default function App() {
   return (
@@ -348,14 +410,20 @@ export default function App() {
 ───────────────────────────────────────────────────────────── */
 const styles = StyleSheet.create({
   splash: {
-    flex:            1,
-    alignItems:      'center',
-    justifyContent:  'center',
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#e8edff',
   },
-  root:       { flex: 1, backgroundColor: '#f0f4ff' },
-  screenArea: { flex: 1 },
-  fill:       { flex: 1 },
+
+  root: { flex: 1, backgroundColor: '#f0f4ff' },
+
+  dashboardLayout: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+
+  fill: { flex: 1 },
 
   subScreenOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -365,7 +433,6 @@ const styles = StyleSheet.create({
 
   fab: {
     position:        'absolute',
-    bottom:          80,
     right:           18,
     width:           54,
     height:          54,

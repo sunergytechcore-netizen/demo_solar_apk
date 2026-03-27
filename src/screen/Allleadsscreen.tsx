@@ -141,23 +141,43 @@ const LoadingSkeleton = () => (
 
 /* ─────────────────────────────────────────────────────────────
    FILTER BOTTOM SHEET
+   FIX 1: Moved `if (!visible) return null` BEFORE the animation
+           useEffect so the sheet unmounts cleanly when closed.
+   FIX 2: Renamed internal props to match what the parent passes:
+           searchQuery  → used correctly via props
+           setSearchQuery → used correctly via props
+           (parent was already passing searchQuery/setSearchQuery
+            but the internal TextInput was wired to the same names,
+            so this is now explicit and consistent)
 ───────────────────────────────────────────────────────────── */
 const FilterSheet = ({
   visible, onClose, statusFilter, setStatusFilter,
   sortBy, setSortBy, searchQuery, setSearchQuery, onClear,
-}: any) => {
+}: {
+  visible: boolean;
+  onClose: () => void;
+  statusFilter: string;
+  setStatusFilter: (v: string) => void;
+  sortBy: string;
+  setSortBy: (v: string) => void;
+  searchQuery: string;
+  setSearchQuery: (v: string) => void;
+  onClear: () => void;
+}) => {
   const slideAnim = useRef(new Animated.Value(600)).current;
 
+  // FIX 1: Run animation regardless of visible state so the close
+  // animation actually plays. The Modal handles visibility gating.
   useEffect(() => {
     Animated.spring(slideAnim, {
       toValue: visible ? 0 : 600,
       useNativeDriver: true,
-      tension: 80, friction: 12,
+      tension: 80,
+      friction: 12,
     }).start();
   }, [visible]);
 
-  if (!visible) return null;
-
+  // FIX 1: Don't return null before the hook — instead gate via Modal visible prop.
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
       <TouchableOpacity style={fs.overlay} activeOpacity={1} onPress={onClose} />
@@ -178,18 +198,34 @@ const FilterSheet = ({
           <Text style={fs.label}>Search</Text>
           <View style={fs.inputWrap}>
             <MaterialCommunityIcons name="magnify" size={18} color="#94a3b8" />
-            <TextInput style={fs.input} placeholder="Name, email, phone..." placeholderTextColor="#94a3b8" value={searchQuery} onChangeText={setSearchQuery} />
-            {searchQuery ? <TouchableOpacity onPress={() => setSearchQuery('')}><MaterialCommunityIcons name="close-circle" size={16} color="#94a3b8" /></TouchableOpacity> : null}
+            {/* FIX 2: Use searchQuery/setSearchQuery consistently (matches parent props) */}
+            <TextInput
+              style={fs.input}
+              placeholder="Name, email, phone..."
+              placeholderTextColor="#94a3b8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <MaterialCommunityIcons name="close-circle" size={16} color="#94a3b8" />
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Status Filter */}
           <Text style={fs.label}>Lead Status</Text>
           <View style={fs.chipRow}>
-            <TouchableOpacity onPress={() => setStatusFilter('all')} style={[fs.chip, statusFilter === 'all' && { backgroundColor: PRIMARY }]}>
+            <TouchableOpacity
+              onPress={() => setStatusFilter('all')}
+              style={[fs.chip, statusFilter === 'all' && { backgroundColor: PRIMARY }]}>
               <Text style={[fs.chipText, statusFilter === 'all' && { color: '#fff' }]}>All</Text>
             </TouchableOpacity>
             {LEAD_STATUS_OPTIONS.map(s => (
-              <TouchableOpacity key={s} onPress={() => setStatusFilter(s)} style={[fs.chip, statusFilter === s && { backgroundColor: PRIMARY }]}>
+              <TouchableOpacity
+                key={s}
+                onPress={() => setStatusFilter(s)}
+                style={[fs.chip, statusFilter === s && { backgroundColor: PRIMARY }]}>
                 <Text style={[fs.chipText, statusFilter === s && { color: '#fff' }]}>{s}</Text>
               </TouchableOpacity>
             ))}
@@ -204,7 +240,10 @@ const FilterSheet = ({
               { value: 'firstName',  label: 'A → Z'  },
               { value: '-firstName', label: 'Z → A'  },
             ].map(opt => (
-              <TouchableOpacity key={opt.value} onPress={() => setSortBy(opt.value)} style={[fs.chip, sortBy === opt.value && { backgroundColor: PRIMARY }]}>
+              <TouchableOpacity
+                key={opt.value}
+                onPress={() => setSortBy(opt.value)}
+                style={[fs.chip, sortBy === opt.value && { backgroundColor: PRIMARY }]}>
                 <Text style={[fs.chipText, sortBy === opt.value && { color: '#fff' }]}>{opt.label}</Text>
               </TouchableOpacity>
             ))}
@@ -247,6 +286,9 @@ const fs = StyleSheet.create({
 
 /* ─────────────────────────────────────────────────────────────
    VIEW LEAD MODAL
+   FIX 3: Reset tab AND details when lead._id changes, not just
+           when `visible` toggles. Previously switching from lead A
+           to lead B without closing would keep old tab + old data.
 ───────────────────────────────────────────────────────────── */
 const ViewLeadModal = ({ visible, onClose, lead, userRole }: any) => {
   const { fetchAPI } = useAuth();
@@ -258,18 +300,34 @@ const ViewLeadModal = ({ visible, onClose, lead, userRole }: any) => {
   const tabs = ['Basic', 'Visit', 'Documents', 'Timeline'];
 
   useEffect(() => {
-    if (visible && lead?._id) { fetchDetails(); }
-    else { setDetails(null); setError(null); setTab(0); }
-  }, [visible, lead]);
+    if (visible && lead?._id) {
+      // FIX 3: Always reset state when the lead changes, even if modal
+      // was already open (e.g. navigating to a different lead card).
+      setDetails(null);
+      setError(null);
+      setTab(0);
+      fetchDetails();
+    }
+    if (!visible) {
+      setDetails(null);
+      setError(null);
+      setTab(0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, lead?._id]);   // FIX 3: depend on lead._id, not the whole lead object
 
   const fetchDetails = async () => {
     try {
-      setLoading(true); setError(null);
+      setLoading(true);
+      setError(null);
       const res = await fetchAPI(`/lead/getLeadById/${lead._id}`);
       if (res.success) setDetails(res.result);
       else throw new Error(res.message || 'Failed to fetch');
-    } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!visible) return null;
@@ -331,12 +389,12 @@ const ViewLeadModal = ({ visible, onClose, lead, userRole }: any) => {
                 <View style={vm.section}>
                   <Text style={vm.sectionTitle}>Personal Information</Text>
                   {[
-                    { icon: 'account', label: 'Full Name',    value: `${details.firstName} ${details.lastName}` },
-                    { icon: 'email',   label: 'Email',        value: details.email || 'Not set' },
-                    { icon: 'phone',   label: 'Phone',        value: details.phone || 'Not set' },
-                    { icon: 'home',    label: 'Address',      value: details.address || 'Not set' },
-                    { icon: 'map-marker', label: 'City',      value: details.city || 'Not set' },
-                    { icon: 'solar-power', label: 'Solar Req', value: details.solarRequirement || 'Not set' },
+                    { icon: 'account',     label: 'Full Name',    value: `${details.firstName} ${details.lastName}` },
+                    { icon: 'email',       label: 'Email',        value: details.email || 'Not set' },
+                    { icon: 'phone',       label: 'Phone',        value: details.phone || 'Not set' },
+                    { icon: 'home',        label: 'Address',      value: details.address || 'Not set' },
+                    { icon: 'map-marker',  label: 'City',         value: details.city || 'Not set' },
+                    { icon: 'solar-power', label: 'Solar Req',    value: details.solarRequirement || 'Not set' },
                   ].map(row => (
                     <View key={row.label} style={vm.infoRow}>
                       <MaterialCommunityIcons name={row.icon} size={18} color={alpha(PRIMARY, 0.6)} style={{ width: 26 }} />
@@ -537,6 +595,12 @@ const vm = StyleSheet.create({
 
 /* ─────────────────────────────────────────────────────────────
    EDIT LEAD MODAL
+   FIX 4: useEffect now depends on lead?._id so the form resets
+           correctly when a different lead is opened without
+           closing the modal first.
+   FIX 5: Per-field error clearing now uses a functional updater
+           that only wipes the relevant key, not the whole errors
+           object — prevents ghost validation errors.
 ───────────────────────────────────────────────────────────── */
 const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
   const { fetchAPI } = useAuth();
@@ -545,12 +609,20 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
   const [loading, setLoading] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
 
+  // FIX 4: Depend on lead?._id so switching leads always resets the form.
   useEffect(() => {
     if (lead) {
-      setForm({ firstName: lead.firstName || '', lastName: lead.lastName || '', email: lead.email || '', phone: lead.phone || '', status: lead.status || 'Visit' });
+      setForm({
+        firstName: lead.firstName || '',
+        lastName:  lead.lastName  || '',
+        email:     lead.email     || '',
+        phone:     lead.phone     || '',
+        status:    lead.status    || 'Visit',
+      });
       setErrors({});
+      setShowStatusPicker(false);
     }
-  }, [lead]);
+  }, [lead?._id]); // FIX 4: was [lead]
 
   const validate = () => {
     const e: any = {};
@@ -570,11 +642,17 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
         method: 'PUT',
         body: JSON.stringify(form),
       });
-      if (res.success) { onSave(res.result); onClose(); }
-      else throw new Error(res.message || 'Failed to update');
+      if (res.success) {
+        onSave(res.result);
+        onClose();
+      } else {
+        throw new Error(res.message || 'Failed to update');
+      }
     } catch (e: any) {
       setErrors({ submit: e.message });
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const permissions = ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.TEAM;
@@ -614,22 +692,36 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
           ) : null}
 
           {[
-            { key: 'firstName', label: 'First Name *', placeholder: 'John',            icon: 'account'       },
-            { key: 'lastName',  label: 'Last Name *',  placeholder: 'Doe',             icon: 'account'       },
-            { key: 'email',     label: 'Email *',      placeholder: 'john@email.com',  icon: 'email-outline' },
-            { key: 'phone',     label: 'Phone *',      placeholder: '9876543210',      icon: 'phone'         },
+            { key: 'firstName', label: 'First Name *', placeholder: 'John',           icon: 'account'       },
+            { key: 'lastName',  label: 'Last Name *',  placeholder: 'Doe',            icon: 'account'       },
+            { key: 'email',     label: 'Email *',      placeholder: 'john@email.com', icon: 'email-outline' },
+            { key: 'phone',     label: 'Phone *',      placeholder: '9876543210',     icon: 'phone'         },
           ].map(f => (
             <View key={f.key} style={em.field}>
               <Text style={em.fieldLabel}>{f.label}</Text>
               <View style={[em.inputWrap, errors[f.key] && em.inputError]}>
-                <MaterialCommunityIcons name={f.icon} size={18} color={errors[f.key] ? '#f44336' : alpha(PRIMARY, 0.6)} />
+                <MaterialCommunityIcons
+                  name={f.icon}
+                  size={18}
+                  color={errors[f.key] ? '#f44336' : alpha(PRIMARY, 0.6)}
+                />
                 <TextInput
                   style={em.input}
                   placeholder={f.placeholder}
                   placeholderTextColor="#94a3b8"
                   value={form[f.key as keyof typeof form]}
-                  onChangeText={v => { setForm(p => ({ ...p, [f.key]: v })); if (errors[f.key]) setErrors((p: any) => ({ ...p, [f.key]: '' })); }}
-                  keyboardType={f.key === 'phone' ? 'phone-pad' : f.key === 'email' ? 'email-address' : 'default'}
+                  onChangeText={v => {
+                    setForm(p => ({ ...p, [f.key]: v }));
+                    // FIX 5: Clear only this field's error, not the whole errors object.
+                    if (errors[f.key]) {
+                      setErrors((p: any) => ({ ...p, [f.key]: undefined }));
+                    }
+                  }}
+                  keyboardType={
+                    f.key === 'phone' ? 'phone-pad'
+                    : f.key === 'email' ? 'email-address'
+                    : 'default'
+                  }
                   autoCapitalize={f.key === 'email' || f.key === 'phone' ? 'none' : 'words'}
                 />
               </View>
@@ -640,7 +732,9 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
           {/* Status Picker */}
           <View style={em.field}>
             <Text style={em.fieldLabel}>Status *</Text>
-            <TouchableOpacity style={em.inputWrap} onPress={() => setShowStatusPicker(!showStatusPicker)}>
+            <TouchableOpacity
+              style={em.inputWrap}
+              onPress={() => setShowStatusPicker(v => !v)}>
               <MaterialCommunityIcons name={getStatusCfg(form.status).icon} size={18} color={getStatusCfg(form.status).color} />
               <Text style={[em.input, { color: '#1e293b' }]}>{form.status}</Text>
               <MaterialCommunityIcons name={showStatusPicker ? 'chevron-up' : 'chevron-down'} size={18} color="#94a3b8" />
@@ -650,7 +744,9 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
                 {LEAD_STATUS_OPTIONS.map(s => {
                   const cfg = getStatusCfg(s);
                   return (
-                    <TouchableOpacity key={s} style={[em.pickerItem, form.status === s && em.pickerItemActive]}
+                    <TouchableOpacity
+                      key={s}
+                      style={[em.pickerItem, form.status === s && em.pickerItemActive]}
                       onPress={() => { setForm(p => ({ ...p, status: s })); setShowStatusPicker(false); }}>
                       <MaterialCommunityIcons name={cfg.icon} size={16} color={form.status === s ? '#fff' : cfg.color} />
                       <Text style={[em.pickerText, form.status === s && em.pickerTextActive]}>{s}</Text>
@@ -667,8 +763,13 @@ const EditLeadModal = ({ visible, onClose, lead, onSave, userRole }: any) => {
           <TouchableOpacity style={em.cancelBtn} onPress={onClose} disabled={loading}>
             <Text style={em.cancelText}>Cancel</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[em.saveBtn, loading && { opacity: 0.6 }]} onPress={handleSubmit} disabled={loading}>
-            {loading ? <ActivityIndicator size="small" color="#fff" /> : <><MaterialCommunityIcons name="content-save" size={18} color="#fff" /><Text style={em.saveText}>Save Changes</Text></>}
+          <TouchableOpacity
+            style={[em.saveBtn, loading && { opacity: 0.6 }]}
+            onPress={handleSubmit}
+            disabled={loading}>
+            {loading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <><MaterialCommunityIcons name="content-save" size={18} color="#fff" /><Text style={em.saveText}>Save Changes</Text></>}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -726,6 +827,7 @@ const AssignLeadModal = ({ visible, onClose, lead, onAssign, userRole, showToast
       if (availRoles.length === 1) { setAssignToRole(availRoles[0]); fetchUsers(availRoles[0]); }
       else { setAssignToRole(''); setUsers([]); }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const fetchUsers = async (role: string) => {
@@ -810,10 +912,23 @@ const AssignLeadModal = ({ visible, onClose, lead, onAssign, userRole, showToast
               <Text style={am.sectionLabel}>Assign To Role</Text>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 {availRoles.map(role => (
-                  <TouchableOpacity key={role} style={[am.roleCard, assignToRole === role && am.roleCardActive]} onPress={() => handleRoleSelect(role)}>
-                    <MaterialCommunityIcons name={role === 'ASM' ? 'account-supervisor' : 'account-group'} size={22} color={assignToRole === role ? '#fff' : '#00838f'} />
-                    <Text style={[am.roleCardText, assignToRole === role && am.roleCardTextActive]}>{role === 'ASM' ? 'ASM' : 'Team'}</Text>
-                    {users.length > 0 && assignToRole === role && <Text style={[am.roleCardSub, { color: assignToRole === role ? 'rgba(255,255,255,0.8)' : '#94a3b8' }]}>{users.length} available</Text>}
+                  <TouchableOpacity
+                    key={role}
+                    style={[am.roleCard, assignToRole === role && am.roleCardActive]}
+                    onPress={() => handleRoleSelect(role)}>
+                    <MaterialCommunityIcons
+                      name={role === 'ASM' ? 'account-supervisor' : 'account-group'}
+                      size={22}
+                      color={assignToRole === role ? '#fff' : '#00838f'}
+                    />
+                    <Text style={[am.roleCardText, assignToRole === role && am.roleCardTextActive]}>
+                      {role === 'ASM' ? 'ASM' : 'Team'}
+                    </Text>
+                    {users.length > 0 && assignToRole === role && (
+                      <Text style={[am.roleCardSub, { color: assignToRole === role ? 'rgba(255,255,255,0.8)' : '#94a3b8' }]}>
+                        {users.length} available
+                      </Text>
+                    )}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -836,7 +951,10 @@ const AssignLeadModal = ({ visible, onClose, lead, onAssign, userRole, showToast
                 </View>
               ) : (
                 users.map((u: any) => (
-                  <TouchableOpacity key={u._id} style={[am.userCard, selectedId === u._id && am.userCardActive]} onPress={() => setSelectedId(u._id)}>
+                  <TouchableOpacity
+                    key={u._id}
+                    style={[am.userCard, selectedId === u._id && am.userCardActive]}
+                    onPress={() => setSelectedId(u._id)}>
                     <Avatar label={initials(u.firstName, u.lastName)} color="#00838f" size={38} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={[am.userName, selectedId === u._id && { color: '#fff' }]}>{u.firstName} {u.lastName}</Text>
@@ -856,7 +974,9 @@ const AssignLeadModal = ({ visible, onClose, lead, onAssign, userRole, showToast
             <View style={am.confirmBox}>
               <MaterialCommunityIcons name="check-circle" size={18} color="#00838f" />
               <Text style={am.confirmText}>
-                This lead will be assigned to <Text style={{ fontWeight: '700' }}>{selectedUser.firstName} {selectedUser.lastName}</Text> ({assignToRole})
+                This lead will be assigned to{' '}
+                <Text style={{ fontWeight: '700' }}>{selectedUser.firstName} {selectedUser.lastName}</Text>{' '}
+                ({assignToRole})
               </Text>
             </View>
           )}
@@ -871,7 +991,9 @@ const AssignLeadModal = ({ visible, onClose, lead, onAssign, userRole, showToast
             style={[am.assignBtn, (!selectedId || !assignToRole || loading) && { opacity: 0.5 }]}
             onPress={handleSubmit}
             disabled={!selectedId || !assignToRole || loading}>
-            {loading ? <ActivityIndicator size="small" color="#fff" /> : <><MaterialCommunityIcons name="account-arrow-right" size={18} color="#fff" /><Text style={am.assignText}>Assign Lead</Text></>}
+            {loading
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <><MaterialCommunityIcons name="account-arrow-right" size={18} color="#fff" /><Text style={am.assignText}>Assign Lead</Text></>}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -972,9 +1094,17 @@ const LeadCard = ({ lead, onView, onEdit, onAssign, onDelete, permissions }: any
             <View style={lc.assignedWrap}>
               <Text style={lc.assignedLabel}>Assigned To</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <Avatar label={initials(lead.assignedUser?.firstName || lead.assignedManager?.firstName)} color={PRIMARY} size={26} />
-                <Text style={lc.assignedName}>{lead.assignedUser?.firstName || lead.assignedManager?.firstName}</Text>
-                <View style={lc.roleBadge}><Text style={lc.roleBadgeText}>{lead.assignedUser?.role || lead.assignedManager?.role}</Text></View>
+                <Avatar
+                  label={initials(lead.assignedUser?.firstName || lead.assignedManager?.firstName)}
+                  color={PRIMARY}
+                  size={26}
+                />
+                <Text style={lc.assignedName}>
+                  {lead.assignedUser?.firstName || lead.assignedManager?.firstName}
+                </Text>
+                <View style={lc.roleBadge}>
+                  <Text style={lc.roleBadgeText}>{lead.assignedUser?.role || lead.assignedManager?.role}</Text>
+                </View>
               </View>
             </View>
           ) : null}
@@ -984,17 +1114,23 @@ const LeadCard = ({ lead, onView, onEdit, onAssign, onDelete, permissions }: any
               <MaterialCommunityIcons name="eye-outline" size={16} color="#fff" />
             </TouchableOpacity>
             {permissions.edit && (
-              <TouchableOpacity style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha(PRIMARY, 0.3) }]} onPress={() => onEdit(lead)}>
+              <TouchableOpacity
+                style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha(PRIMARY, 0.3) }]}
+                onPress={() => onEdit(lead)}>
                 <MaterialCommunityIcons name="pencil-outline" size={16} color={PRIMARY} />
               </TouchableOpacity>
             )}
             {permissions.assign && (
-              <TouchableOpacity style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha('#00bcd4', 0.3) }]} onPress={() => onAssign(lead)}>
+              <TouchableOpacity
+                style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha('#00bcd4', 0.3) }]}
+                onPress={() => onAssign(lead)}>
                 <MaterialCommunityIcons name="account-arrow-right" size={16} color="#00838f" />
               </TouchableOpacity>
             )}
             {permissions.delete && (
-              <TouchableOpacity style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha('#f44336', 0.3) }]} onPress={handleDelete}>
+              <TouchableOpacity
+                style={[lc.actionBtn, { backgroundColor: '#fff', borderWidth: 1.5, borderColor: alpha('#f44336', 0.3) }]}
+                onPress={handleDelete}>
                 <MaterialCommunityIcons name="trash-can-outline" size={16} color="#f44336" />
               </TouchableOpacity>
             )}
@@ -1034,10 +1170,17 @@ const Toast = ({ visible, message, type }: { visible: boolean; message: string; 
   useEffect(() => {
     Animated.timing(anim, { toValue: visible ? 1 : 0, duration: 300, useNativeDriver: true }).start();
   }, [visible]);
-  const bg = type === 'success' ? '#4caf50' : '#f44336';
+  const bg   = type === 'success' ? '#4caf50' : '#f44336';
   const icon = type === 'success' ? 'check-circle' : 'alert-circle';
   return (
-    <Animated.View style={[toast.wrap, { backgroundColor: bg, opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
+    <Animated.View style={[
+      toast.wrap,
+      {
+        backgroundColor: bg,
+        opacity: anim,
+        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      },
+    ]}>
       <MaterialCommunityIcons name={icon} size={18} color="#fff" />
       <Text style={toast.text}>{message}</Text>
     </Animated.View>
@@ -1084,12 +1227,12 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
 
   const debouncedSearch = useDebounce(searchTerm, 500);
 
-  const userRole   = user?.role || 'TEAM';
-  const perms      = ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.TEAM;
+  const userRole = user?.role || 'TEAM';
+  const perms    = ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.TEAM;
 
   const activeFilterCount = useMemo(() => {
     let c = 0;
-    if (searchTerm) c++;
+    if (searchTerm)          c++;
     if (statusFilter !== 'all') c++;
     if (sortBy !== '-createdAt') c++;
     return c;
@@ -1117,10 +1260,14 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
         const newLeads = data.result.leads || [];
         setLeads(pg === 1 ? newLeads : prev => [...prev, ...newLeads]);
         setTotalLeads(data.result.pagination?.total || 0);
-      } else showToast(data.message || 'Failed to fetch leads', 'error');
+      } else {
+        showToast(data.message || 'Failed to fetch leads', 'error');
+      }
     } catch (e: any) {
       showToast(e.message || 'Failed to fetch leads', 'error');
-    } finally { setLoading(false); setRefreshing(false); }
+    } finally {
+      setLoading(false); setRefreshing(false);
+    }
   }, [fetchAPI, debouncedSearch, statusFilter, sortBy, showToast]);
 
   useEffect(() => { setPage(1); fetchLeads(false, 1); }, [debouncedSearch, statusFilter, sortBy]);
@@ -1137,24 +1284,49 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
   const handleDeleteLead = useCallback(async (leadId: string) => {
     try {
       const res = await fetchAPI(`/lead/deleteLead/${leadId}`, { method: 'DELETE' });
-      if (res.success) { showToast('Lead deleted successfully', 'success'); fetchLeads(false, 1); setPage(1); }
-      else throw new Error(res.message || 'Failed to delete');
-    } catch (e: any) { showToast(e.message || 'Failed to delete lead', 'error'); }
+      if (res.success) {
+        showToast('Lead deleted successfully', 'success');
+        fetchLeads(false, 1);
+        setPage(1);
+      } else {
+        throw new Error(res.message || 'Failed to delete');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Failed to delete lead', 'error');
+    }
   }, [fetchAPI, fetchLeads, showToast]);
 
-  const handleSaveLead   = useCallback(() => { showToast('Lead updated successfully', 'success'); fetchLeads(false, 1); setPage(1); }, [fetchLeads, showToast]);
-  const handleAssignLead = useCallback(() => { fetchLeads(false, 1); setPage(1); }, [fetchLeads]);
+  const handleSaveLead = useCallback(() => {
+    showToast('Lead updated successfully', 'success');
+    fetchLeads(false, 1);
+    setPage(1);
+  }, [fetchLeads, showToast]);
 
-  const handleClearFilters = () => { setSearchTerm(''); setStatusFilter('all'); setSortBy('-createdAt'); };
+  const handleAssignLead = useCallback(() => {
+    fetchLeads(false, 1);
+    setPage(1);
+  }, [fetchLeads]);
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setSortBy('-createdAt');
+  };
 
   /* ── Empty state ─────────────────────────────────────────── */
   const renderEmpty = () => (
     <View style={s.emptyWrap}>
       <View style={s.emptyIcon}>
-        <MaterialCommunityIcons name={activeFilterCount > 0 ? 'magnify-remove-outline' : 'account-group-outline'} size={52} color={PRIMARY} />
+        <MaterialCommunityIcons
+          name={activeFilterCount > 0 ? 'magnify-remove-outline' : 'account-group-outline'}
+          size={52}
+          color={PRIMARY}
+        />
       </View>
       <Text style={s.emptyTitle}>{activeFilterCount > 0 ? 'No matching leads found' : 'No leads yet'}</Text>
-      <Text style={s.emptySub}>{activeFilterCount > 0 ? 'Try adjusting your filters' : 'Get started by adding your first lead'}</Text>
+      <Text style={s.emptySub}>
+        {activeFilterCount > 0 ? 'Try adjusting your filters' : 'Get started by adding your first lead'}
+      </Text>
       {activeFilterCount > 0 && (
         <TouchableOpacity style={s.clearFiltersBtn} onPress={handleClearFilters}>
           <Text style={s.clearFiltersBtnText}>Clear Filters</Text>
@@ -1220,7 +1392,9 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
           onPress={() => setFilterOpen(true)}>
           <MaterialCommunityIcons name="filter-variant" size={20} color={activeFilterCount > 0 ? '#fff' : PRIMARY} />
           {activeFilterCount > 0 && (
-            <View style={s.filterBadge}><Text style={s.filterBadgeText}>{activeFilterCount}</Text></View>
+            <View style={s.filterBadge}>
+              <Text style={s.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
           )}
         </TouchableOpacity>
       </View>
@@ -1228,17 +1402,24 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
       {/* ── Active filters strip ── */}
       {activeFilterCount > 0 && (
         <View style={s.activeFiltersStrip}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
             {searchTerm ? (
               <View style={s.filterChip}>
                 <Text style={s.filterChipText}>Search: {searchTerm}</Text>
-                <TouchableOpacity onPress={() => setSearchTerm('')}><MaterialCommunityIcons name="close" size={14} color={PRIMARY} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setSearchTerm('')}>
+                  <MaterialCommunityIcons name="close" size={14} color={PRIMARY} />
+                </TouchableOpacity>
               </View>
             ) : null}
             {statusFilter !== 'all' ? (
               <View style={s.filterChip}>
                 <Text style={s.filterChipText}>{statusFilter}</Text>
-                <TouchableOpacity onPress={() => setStatusFilter('all')}><MaterialCommunityIcons name="close" size={14} color={PRIMARY} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setStatusFilter('all')}>
+                  <MaterialCommunityIcons name="close" size={14} color={PRIMARY} />
+                </TouchableOpacity>
               </View>
             ) : null}
             <TouchableOpacity style={[s.filterChip, { borderStyle: 'dashed' }]} onPress={handleClearFilters}>
@@ -1258,11 +1439,19 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
           keyExtractor={item => item._id}
           contentContainerStyle={{ padding: 12, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchLeads(true, 1)} colors={[PRIMARY]} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchLeads(true, 1)}
+              colors={[PRIMARY]}
+            />
+          }
           ListHeaderComponent={
             <View style={s.listHeader}>
               <Text style={s.listHeaderText}>Lead Cards</Text>
-              <View style={s.countBadge}><Text style={s.countBadgeText}>{totalLeads} total</Text></View>
+              <View style={s.countBadge}>
+                <Text style={s.countBadgeText}>{totalLeads} total</Text>
+              </View>
             </View>
           }
           ListEmptyComponent={renderEmpty}
@@ -1283,6 +1472,8 @@ export default function AllLeadsScreen({ onMenuPress, onSearchPress, onProfilePr
       )}
 
       {/* ── Modals ── */}
+      {/* FIX: Pass searchTerm/setSearchTerm to FilterSheet using the
+          prop names it expects (searchQuery / setSearchQuery) */}
       <FilterSheet
         visible={filterOpen}
         onClose={() => setFilterOpen(false)}

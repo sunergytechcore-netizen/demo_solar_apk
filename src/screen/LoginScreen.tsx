@@ -12,9 +12,9 @@ import {
   ActivityIndicator,
   Animated,
   StatusBar,
-  SafeAreaView,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from "react-native-safe-area-context";
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAuth } from '../contexts/AuthContext'; // ✅ ADDED
 
