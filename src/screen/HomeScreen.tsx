@@ -158,7 +158,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
           ))
         )}
       </View>
-
       <View style={{height: 100}} />
     </ScrollView>
   );
@@ -213,3 +212,4 @@ const styles = StyleSheet.create({
   viewAllLink:     {flexDirection: 'row', alignItems: 'center'},
   viewAllLinkText: {fontSize: 13, color: '#3b5bdb', fontWeight: '600'},
 });
+

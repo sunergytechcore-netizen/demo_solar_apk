@@ -6,7 +6,7 @@ import {
   View,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
+ 
   StatusBar,
   ActivityIndicator,
 } from 'react-native';
@@ -20,8 +20,8 @@ import LoginScreen              from './src/screen/LoginScreen';
 import HomeScreen               from './src/screen/HomeScreen';
 import CreateLeadScreen         from './src/screen/CreateLeadScreen';
 import AllLeadsScreen           from './src/screen/Allleadsscreen';
-import AttendanceScreen         from './src/screen/Attendancescreen';
-import LocationVisitScreen      from './src/screen/Locationvisitscreen';
+
+
 import LeadFunnelScreen         from './src/screen/LeadFunnelScreen';
 import TotalVisitsScreen        from './src/screen/TotalVisitsScreen';
 import RegistrationScreen       from './src/screen/Registrationscreen';
@@ -38,6 +38,14 @@ import TimePeriodModal   from './src/components/TimePeriodModal';
 import DocumentSubmissionPage from './src/components/Documentsubmissionscreen';
 import BankLoanPendingScreen from './src/screen/BankLoanPendingScreen';
 import BankLoanApplyScreen from './src/screen/BankLoanApplyScreen';
+import DisbursementPage from './src/screen/DisbursementScreen';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import MissedLeadsPage from './src/screen/MissedLeadsScreen';
+import InstallationPage from './src/screen/InstallationScreen';
+import ExpensesScreen from './src/screen/ExpensesScreen';
+import AttendanceScreen from './src/screen/Attendancescreen';
+import CreateVisitScreen from './src/screen/Locationvisitscreen';
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SubScreen = null | 'createLead';
@@ -58,6 +66,8 @@ type MenuId =
   | 'bankLoan'
   | 'document'     // ← added to union
   |'loanPending'
+  |'disbursement'
+  |'missedLeads'
   | string;
 
 interface UserData {
@@ -180,14 +190,16 @@ function AppInner() {
             {...commonHandlers}
             onFilterPress={() => setTimePeriodOpen(true)}
             selectedPeriod={selectedPeriod}
-            onViewVisits={()          => setActiveTab('totalVisits')}
+            onViewTotalVisits={()     => setActiveTab('totalVisits')}
             onViewRegistrations={()   => setActiveMenu('registration')}
             onViewMissedLeads={()     => setActiveTab('allLeads')}
             onViewAttendance={()      => setActiveTab('attendance')}
             onViewLocationVisit={()   => setActiveTab('locationVisit')}
             onViewBankLoans={()       => setActiveMenu('bankLoan')}
             onViewDocuments={()       => setActiveMenu('document')} // ← optional shortcut
-            onViewLocanPending={()       => setActiveMenu('loanPending')} // ← optional shortcut
+            onViewLocanPending={()       => setActiveMenu('loanPending')} 
+            onViewDisbursement={()       => setActiveMenu('disbursement')} 
+            onViewmissedLeads={()       => setActiveMenu('missedLeads')} 
           />
         );
       case 'allLeads':
@@ -206,7 +218,7 @@ function AppInner() {
         );
       case 'locationVisit':
         return (
-          <LocationVisitScreen
+          <CreateVisitScreen
             {...commonHandlers}
             onBackPress={() => setActiveTab('home')}
           />
@@ -272,6 +284,36 @@ function AppInner() {
         case 'bankLoan':
         return (
           <BankLoanApplyScreen 
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        );
+
+        case 'disbursement':
+        return (
+          <DisbursementPage 
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        );
+        case 'missedLeads':
+        return (
+          <MissedLeadsPage
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        );
+
+         case 'installation':
+        return (
+          <InstallationPage
+            onBackPress={backToDashboard}
+            onMenuPress={() => setSidebarOpen(true)}
+          />
+        )
+          case 'expense':
+        return (
+          <ExpensesScreen
             onBackPress={backToDashboard}
             onMenuPress={() => setSidebarOpen(true)}
           />

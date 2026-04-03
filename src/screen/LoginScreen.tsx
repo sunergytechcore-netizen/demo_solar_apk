@@ -13,6 +13,7 @@ import {
   Animated,
   StatusBar,
   Dimensions,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from "react-native-safe-area-context";
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -325,7 +326,10 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
             {/* ── Logo ── */}
             <View style={styles.logoSection}>
               <Animated.View style={[styles.logoCircle, { transform: [{ scale: pulseAnim }] }]}>
-                <MaterialCommunityIcons name="solar-power" size={48} color={COLOR} />
+                <Image
+  source={require('../../assets/Images/logo192.png')}
+  style={{ width: 50, height: 50 }}
+/>
               </Animated.View>
               <Text style={styles.appTitle}>Solar Management System</Text>
               <Text style={styles.appSubtitle}>SunergyTech</Text>

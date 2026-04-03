@@ -22,13 +22,14 @@ import {
   Platform,
   Animated,
   RefreshControl,
-  SafeAreaView,
+ 
   StatusBar,
   Alert,
   Switch,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAuth } from '../contexts/AuthContext';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PRIMARY   = '#4569ea';
@@ -1041,7 +1042,41 @@ const am = StyleSheet.create({
 /* ─────────────────────────────────────────────────────────────
    LEAD CARD (Mobile)
 ───────────────────────────────────────────────────────────── */
-const LeadCard = ({ lead, onView, onEdit, onAssign, onDelete, permissions }: any) => {
+interface Lead {
+  _id: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  email?: string;
+  status: string;
+  createdAt: string;
+
+  assignedUser?: {
+    firstName: string;
+    role: string;
+  };
+
+  assignedManager?: {
+    firstName: string;
+    role: string;
+  };
+}
+interface LeadCardProps {
+  lead: Lead;
+  permissions: any; // you can type this later if needed
+  onView: (lead: Lead) => void;
+  onEdit: (lead: Lead) => void;
+  onAssign: (lead: Lead) => void;
+  onDelete: (id: string) => void;
+}
+const LeadCard: React.FC<LeadCardProps> = ({
+  lead,
+  onView,
+  onEdit,
+  onAssign,
+  onDelete,
+  permissions,
+}) => {
   const [expanded, setExpanded] = useState(false);
   const cfg = getStatusCfg(lead.status);
 

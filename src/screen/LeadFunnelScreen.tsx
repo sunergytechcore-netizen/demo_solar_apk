@@ -20,11 +20,12 @@ import {
   Platform,
   Animated,
   RefreshControl,
-  SafeAreaView,
+ 
   StatusBar,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAuth } from '../contexts/AuthContext';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PRIMARY   = '#4569ea';

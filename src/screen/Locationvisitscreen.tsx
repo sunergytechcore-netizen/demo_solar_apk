@@ -1,560 +1,768 @@
-import React, {useState} from 'react';
+// screens/CreateVisitScreen.tsx
+//
+// Required packages:
+//   npm i react-native-location
+//   npm install react-native-webview        ← for the LeafletMap component
+//   npm install react-native-image-picker
+//   npm install react-native-vector-icons
+//   cd ios && pod install
+//
+// Android AndroidManifest.xml:
+//   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+//   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+//   <uses-permission android:name="android.permission.CAMERA" />
+//   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+//   <uses-permission android:name="android.permission.INTERNET" />
+//
+// iOS Info.plist:
+//   NSLocationWhenInUseUsageDescription
+//   NSCameraUsageDescription
+//   NSPhotoLibraryUsageDescription
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, Modal, Platform, PermissionsAndroid, ActivityIndicator,
+  Image, Animated, KeyboardAvoidingView,
+  Dimensions, StatusBar,
+  Alert,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { launchCamera } from 'react-native-image-picker';
+import { useAuth } from '../contexts/AuthContext';
+import LeafletMap from '../components/Leafletmap';
+import { useGeo } from '../hooks/useGeo';
+
+// ─── useGeo hook ──────────────────────────────────────────────────────────────
+// Handles permission, GPS-off detection (503 / null loc), reverse geocoding,
+// and alert dialogs. Drop in and call fetchLocation() wherever you need it.
+
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const PRIMARY   = '#4569ea';
+const SECONDARY = '#1a237e';
+const SUCCESS   = '#4caf50';
+const ERROR_COL = '#f44336';
+const WARNING   = '#ff9800';
+const BG        = '#f8fafc';
+
+const rgba = (hex: string, opacity: number) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface LocationVisit {
-  id: string;
-  customerName: string;
-  phone: string;
-  address: string;
-  area: string;
-  checkIn?: string;
-  checkOut?: string;
-  status: 'Completed' | 'Ongoing' | 'Scheduled' | 'Cancelled';
-  visitType: 'Site Visit' | 'Follow-up' | 'Demo' | 'Survey';
-  date: string;
-  distance?: string;
-  notes?: string;
+interface FormData {
+  locationName: string; remarks: string;
+  contactPerson: string; phone: string; email: string;
+}
+interface ImageData { uri: string; type: string; name: string; }
+interface Props {
+  onClose?: () => void;
+  onSave?:  (data: any) => void;
+  onBackPress?: () => void;
 }
 
-interface LocationVisitScreenProps {
-  onBackPress?:    () => void;
-  onMenuPress?:    () => void;
-  onSearchPress?:  () => void;
-  onProfilePress?: () => void;
-  onNewVisit?:     () => void;   // ← opens CreateVisitScreen
-}
-
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const VISITS: LocationVisit[] = [
-  {id:'1', customerName:'ANANTA SAMAL',  phone:'7847867300', address:'Plot 42, Patia, Bhubaneswar', area:'Patia',       checkIn:'09:30 AM', checkOut:'11:00 AM', status:'Completed', visitType:'Site Visit', date:'Today',      distance:'3.2 km', notes:'Interested in 5kW panel'},
-  {id:'2', customerName:'Tushar Kumar',  phone:'8457852616', address:'MIG-18, Cuttack Rd, BBSR',   area:'Nayapalli',   checkIn:'11:45 AM', checkOut:undefined,  status:'Ongoing',   visitType:'Demo',      date:'Today',      distance:'6.8 km'},
-  {id:'3', customerName:'Ramesh Patel',  phone:'9876543210', address:'Sector-6, Rourkela',          area:'Sector 6',    checkIn:undefined,  checkOut:undefined,  status:'Scheduled', visitType:'Follow-up', date:'Today',      distance:'2.1 km', notes:'Call before arriving'},
-  {id:'4', customerName:'Sunita Devi',   phone:'8765432109', address:'Gandhi Nagar, Sambalpur',     area:'Gandhi Nagar',checkIn:'09:00 AM', checkOut:'10:30 AM', status:'Completed', visitType:'Survey',    date:'Yesterday',  distance:'1.5 km'},
-  {id:'5', customerName:'chelai chm gha',phone:'6373737378', address:'Marine Drive, Puri',          area:'Marine Drive',checkIn:'02:00 PM', checkOut:'03:15 PM', status:'Completed', visitType:'Site Visit',date:'Yesterday',  distance:'4.4 km'},
-  {id:'6', customerName:'Ajay Singh',    phone:'7654321098', address:'Uditnagar, Rourkela',         area:'Uditnagar',   checkIn:undefined,  checkOut:undefined,  status:'Cancelled', visitType:'Demo',      date:'21 Jun',     distance:'7.1 km', notes:'Customer not available'},
-  {id:'7', customerName:'Priya Nair',    phone:'6543210987', address:'Malkangiri, Odisha',          area:'Malkangiri',  checkIn:'10:00 AM', checkOut:'12:00 PM', status:'Completed', visitType:'Survey',    date:'20 Jun',     distance:'5.9 km'},
-];
-
-const STATUS_CFG: Record<string, {bg: string; text: string; icon: string; border: string}> = {
-  Completed: {bg: '#e8f5e9', text: '#2e7d32', icon: 'check-circle-outline', border: '#a5d6a7'},
-  Ongoing:   {bg: '#fff8e1', text: '#f57f17', icon: 'progress-clock',       border: '#ffe082'},
-  Scheduled: {bg: '#e3f2fd', text: '#1565c0', icon: 'calendar-clock',       border: '#90caf9'},
-  Cancelled: {bg: '#fafafa', text: '#9e9e9e', icon: 'cancel',               border: '#e0e0e0'},
-};
-
-const VISIT_TYPE_COLOR: Record<string, string> = {
-  'Site Visit': '#3b5bdb',
-  'Follow-up':  '#7b1fa2',
-  'Demo':       '#00838f',
-  'Survey':     '#bf360c',
-};
-
-const FILTER_TABS = ['All', 'Today', 'Completed', 'Ongoing', 'Scheduled'];
-
-// ─── Component ────────────────────────────────────────────────────────────────
-const LocationVisitScreen: React.FC<LocationVisitScreenProps> = ({
-  onBackPress,
-  onMenuPress,
-  onSearchPress,
-  onProfilePress,
-  onNewVisit,
-}) => {
-  const [activeFilter, setActiveFilter] = useState('All');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [activeVisitId, setActiveVisitId] = useState<string | null>('2'); // "Ongoing" visit
-
-  const filtered = VISITS.filter(v => {
-    if (activeFilter === 'All') return true;
-    if (activeFilter === 'Today') return v.date === 'Today';
-    return v.status === activeFilter;
-  });
-
-  const todayVisits    = VISITS.filter(v => v.date === 'Today');
-  const completedToday = todayVisits.filter(v => v.status === 'Completed').length;
-
+// ─── Snack Bar ────────────────────────────────────────────────────────────────
+const SnackBar = ({ msg, type }: { msg: string; type: 'success'|'error'|'info'|'warning' }) => {
+  const bgMap    = { success:'#dcfce7', error:'#fee2e2', info:'#dbeafe', warning:'#fef9c3' };
+  const colorMap = { success:'#16a34a', error:'#dc2626', info:'#2563eb', warning:'#d97706' };
   return (
-    <View style={styles.screen}>
-      {/* ── Top Bar ── */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={onMenuPress} style={styles.menuBtn}>
-          <MaterialCommunityIcons name="menu" size={28} color="#3b5bdb" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Location Visit</Text>
-        <View style={styles.topBarRight}>
-          <TouchableOpacity style={styles.iconBtn} onPress={onSearchPress}>
-            <Ionicons name="search-outline" size={22} color="#333" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
-            <MaterialCommunityIcons name="map-outline" size={22} color="#333" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.avatar} onPress={onProfilePress} activeOpacity={0.8}>
-            <Text style={styles.avatarText}>NR</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-      <View style={styles.blueLine} />
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-
-        {/* ── Map Placeholder ── */}
-        <View style={styles.mapPlaceholder}>
-          <View style={styles.mapOverlay}>
-            {/* Fake map grid lines */}
-            {[0,1,2,3].map(i => (
-              <View key={`h${i}`} style={[styles.mapGridH, {top: `${20 + i * 22}%` as any}]} />
-            ))}
-            {[0,1,2,3,4].map(i => (
-              <View key={`v${i}`} style={[styles.mapGridV, {left: `${10 + i * 20}%` as any}]} />
-            ))}
-          </View>
-
-          {/* Map pins */}
-          <View style={[styles.mapPin, {top: '30%', left: '25%'}]}>
-            <MaterialCommunityIcons name="map-marker" size={28} color="#3b5bdb" />
-          </View>
-          <View style={[styles.mapPin, {top: '55%', left: '60%'}]}>
-            <MaterialCommunityIcons name="map-marker" size={28} color="#43a047" />
-          </View>
-          <View style={[styles.mapPin, {top: '40%', left: '70%'}]}>
-            <MaterialCommunityIcons name="map-marker" size={28} color="#e65100" />
-          </View>
-          <View style={[styles.mapPin, {top: '25%', left: '50%'}]}>
-            <MaterialCommunityIcons name="map-marker" size={28} color="#9e9e9e" />
-          </View>
-
-          {/* Route line (decorative) */}
-          <View style={styles.mapRouteLine} />
-
-          {/* My Location */}
-          <View style={styles.myLocation}>
-            <View style={styles.myLocationOuter}>
-              <View style={styles.myLocationInner} />
-            </View>
-          </View>
-
-          {/* Map controls */}
-          <View style={styles.mapControls}>
-            <TouchableOpacity style={styles.mapControlBtn}>
-              <MaterialCommunityIcons name="crosshairs-gps" size={20} color="#3b5bdb" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.mapControlBtn}>
-              <MaterialCommunityIcons name="layers-outline" size={20} color="#3b5bdb" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Map label */}
-          <View style={styles.mapLabel}>
-            <MaterialCommunityIcons name="map-marker-radius-outline" size={14} color="#3b5bdb" />
-            <Text style={styles.mapLabelText}>Bhubaneswar, Odisha</Text>
-          </View>
-        </View>
-
-        {/* ── Today Summary ── */}
-        <View style={styles.summaryRow}>
-          <SummaryChip icon="map-marker-check-outline" value={completedToday} label="Completed" color="#2e7d32" bg="#e8f5e9" />
-          <SummaryChip icon="map-marker-path"          value={todayVisits.length} label="Scheduled" color="#3b5bdb" bg="#eef1fb" />
-          <SummaryChip icon="map-marker-distance"      value="18.4 km"            label="Distance"  color="#e65100" bg="#fff3e0" />
-        </View>
-
-        {/* ── Active Visit Banner ── */}
-        {activeVisitId && (() => {
-          const v = VISITS.find(x => x.id === activeVisitId);
-          if (!v) return null;
-          return (
-            <View style={styles.activeBanner}>
-              <View style={styles.activeBannerLeft}>
-                <View style={styles.pulsingDot}>
-                  <View style={styles.pulsingDotInner} />
-                </View>
-                <View>
-                  <Text style={styles.activeBannerLabel}>Ongoing Visit</Text>
-                  <Text style={styles.activeBannerName} numberOfLines={1}>{v.customerName}</Text>
-                  <Text style={styles.activeBannerAddr} numberOfLines={1}>{v.area}</Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={styles.checkOutBtn}
-                onPress={() => setActiveVisitId(null)}
-                activeOpacity={0.85}>
-                <MaterialCommunityIcons name="logout" size={16} color="#fff" />
-                <Text style={styles.checkOutBtnText}>Check Out</Text>
-              </TouchableOpacity>
-            </View>
-          );
-        })()}
-
-        {/* ── Filter Tabs ── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterContent}>
-          {FILTER_TABS.map(tab => {
-            const isActive = activeFilter === tab;
-            const count = tab === 'All' ? VISITS.length
-              : tab === 'Today' ? VISITS.filter(v => v.date === 'Today').length
-              : VISITS.filter(v => v.status === tab).length;
-            return (
-              <TouchableOpacity
-                key={tab}
-                onPress={() => setActiveFilter(tab)}
-                style={[styles.filterTab, isActive && styles.filterTabActive]}
-                activeOpacity={0.75}>
-                <Text style={[styles.filterTabText, isActive && styles.filterTabTextActive]}>
-                  {tab}
-                </Text>
-                <View style={[styles.filterBadge, isActive && styles.filterBadgeActive]}>
-                  <Text style={[styles.filterBadgeText, isActive && styles.filterBadgeTextActive]}>
-                    {count}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* ── Add Visit Button + Count ── */}
-        <View style={styles.listHeaderRow}>
-          <Text style={styles.listCount}>
-            <Text style={styles.listCountNum}>{filtered.length}</Text> visits
-          </Text>
-          <TouchableOpacity style={styles.addBtn} onPress={onNewVisit}>
-            <MaterialCommunityIcons name="plus" size={16} color="#fff" />
-            <Text style={styles.addBtnText}>New Visit</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ── Visit Cards ── */}
-        <View style={styles.listContainer}>
-          {filtered.map(visit => (
-            <VisitCard
-              key={visit.id}
-              visit={visit}
-              isExpanded={expandedId === visit.id}
-              onToggle={() => setExpandedId(expandedId === visit.id ? null : visit.id)}
-              isActive={activeVisitId === visit.id}
-              onCheckIn={() => setActiveVisitId(visit.id)}
-            />
-          ))}
-        </View>
-
-        <View style={{height: 100}} />
-      </ScrollView>
+    <View style={[s.snackBar, { backgroundColor: bgMap[type] }]}>
+      <MaterialCommunityIcons
+        name={type==='success' ? 'check-circle' : type==='error' ? 'alert-circle' : 'information'}
+        size={16} color={colorMap[type]} />
+      <Text style={[s.snackText, { color: colorMap[type] }]}>{msg}</Text>
     </View>
   );
 };
 
-// ─── Visit Card ───────────────────────────────────────────────────────────────
-const VisitCard: React.FC<{
-  visit: LocationVisit;
-  isExpanded: boolean;
-  onToggle: () => void;
-  isActive: boolean;
-  onCheckIn: () => void;
-}> = ({visit, isExpanded, onToggle, isActive, onCheckIn}) => {
-  const cfg = STATUS_CFG[visit.status];
-  const typeColor = VISIT_TYPE_COLOR[visit.visitType] ?? '#3b5bdb';
-  const initials = visit.customerName.split(' ').slice(0,2).map(w => w[0]?.toUpperCase() ?? '').join('');
+// ─── Section Card / Title / Input ─────────────────────────────────────────────
+const SectionCard = ({ children, style }: any) => (
+  <View style={[s.sectionCard, style]}>{children}</View>
+);
+
+const SectionTitle = ({ icon, label, badge, badgeColor }: any) => (
+  <View style={s.sectionTitleRow}>
+    <MaterialCommunityIcons name={icon} size={18} color={PRIMARY} />
+    <Text style={s.sectionTitleText}>{label}</Text>
+    {badge && (
+      <View style={[s.badge, {
+        backgroundColor:
+          badgeColor==='success' ? rgba(SUCCESS,0.12) :
+          badgeColor==='error'   ? rgba(ERROR_COL,0.12) : rgba(WARNING,0.12),
+      }]}>
+        <Text style={[s.badgeText, {
+          color: badgeColor==='success' ? SUCCESS : badgeColor==='error' ? ERROR_COL : WARNING,
+        }]}>{badge}</Text>
+      </View>
+    )}
+  </View>
+);
+
+const InputField = ({
+  icon, label, value, onChange, placeholder,
+  error, multiline=false, rows=1, keyboardType='default', disabled=false,
+}: any) => (
+  <View style={s.inputWrap}>
+    <Text style={s.inputLabel}>{label}</Text>
+    <View style={[s.inputRow, error && s.inputRowError, disabled && s.inputRowDisabled]}>
+      {icon && (
+        <MaterialCommunityIcons name={icon} size={18} color={rgba(PRIMARY,0.5)} style={{ marginRight:8 }} />
+      )}
+      <TextInput
+        style={[s.textInput, multiline && { height: rows*44, textAlignVertical:'top' }]}
+        value={value} onChangeText={onChange} placeholder={placeholder}
+        placeholderTextColor="#bbb" multiline={multiline}
+        numberOfLines={multiline ? rows : 1} keyboardType={keyboardType} editable={!disabled}
+      />
+    </View>
+    {error ? <Text style={s.errorText}>{error}</Text> : null}
+  </View>
+);
+
+// ─── Success Modal ────────────────────────────────────────────────────────────
+const SuccessModal = ({ visible, visitData, onClose }: any) => {
+  const scale = useRef(new Animated.Value(0.7)).current;
+  useEffect(() => {
+    if (visible) Animated.spring(scale, { toValue:1, useNativeDriver:true, tension:60, friction:8 }).start();
+    else scale.setValue(0.7);
+  }, [visible]);
 
   return (
-    <TouchableOpacity
-      style={[styles.card, isActive && styles.cardActive]}
-      onPress={onToggle}
-      activeOpacity={0.85}>
-
-      {/* Active indicator strip */}
-      {isActive && <View style={styles.activeStrip} />}
-
-      <View style={styles.cardMain}>
-        {/* Avatar */}
-        <View style={[styles.cardAvatar, {backgroundColor: typeColor + '20'}]}>
-          <Text style={[styles.cardAvatarText, {color: typeColor}]}>{initials}</Text>
-        </View>
-
-        {/* Info */}
-        <View style={styles.cardInfo}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.cardName} numberOfLines={1}>{visit.customerName}</Text>
-            <View style={[styles.visitTypePill, {backgroundColor: typeColor + '18'}]}>
-              <Text style={[styles.visitTypeText, {color: typeColor}]}>{visit.visitType}</Text>
-            </View>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.modalOverlay}>
+        <Animated.View style={[s.successCard, { transform:[{ scale }] }]}>
+          <View style={s.successIconWrap}>
+            <MaterialCommunityIcons name="check-circle" size={56} color={SUCCESS} />
           </View>
-
-          <View style={styles.cardMeta}>
-            <MaterialCommunityIcons name="map-marker-outline" size={13} color="#aaa" />
-            <Text style={styles.cardMetaText} numberOfLines={1}>{visit.address}</Text>
-          </View>
-
-          <View style={styles.cardBottomRow}>
-            <View style={[styles.statusBadge, {backgroundColor: cfg.bg, borderColor: cfg.border}]}>
-              <MaterialCommunityIcons name={cfg.icon} size={12} color={cfg.text} />
-              <Text style={[styles.statusText, {color: cfg.text}]}>{visit.status}</Text>
+          <Text style={s.successTitle}>Visit Created Successfully!</Text>
+          <Text style={s.successSub}>Your visit has been recorded and synced.</Text>
+          {visitData?.photos?.[0]?.url && (
+            <Image source={{ uri: visitData.photos[0].url }} style={s.successImage} />
+          )}
+          {visitData?.locationName && (
+            <View style={s.successInfoRow}>
+              <MaterialCommunityIcons name="map-marker" size={16} color={PRIMARY} />
+              <Text style={s.successInfoText}>{visitData.locationName}</Text>
             </View>
-
-            <View style={styles.cardMetaRight}>
-              {visit.checkIn && (
-                <Text style={styles.timeText}>
-                  {visit.checkIn}{visit.checkOut ? ` → ${visit.checkOut}` : ' →'}
-                </Text>
-              )}
-              {visit.distance && (
-                <View style={styles.distRow}>
-                  <MaterialCommunityIcons name="map-marker-distance" size={12} color="#aaa" />
-                  <Text style={styles.distText}>{visit.distance}</Text>
-                </View>
-              )}
+          )}
+          {visitData?.coordinates && (
+            <View style={s.coordRow}>
+              <View style={s.coordBox}>
+                <Text style={s.coordLabel}>Latitude</Text>
+                <Text style={s.coordVal}>{visitData.coordinates.lat?.toFixed(6)}°</Text>
+              </View>
+              <View style={s.coordBox}>
+                <Text style={s.coordLabel}>Longitude</Text>
+                <Text style={s.coordVal}>{visitData.coordinates.lng?.toFixed(6)}°</Text>
+              </View>
             </View>
+          )}
+          <View style={s.successBtns}>
+            <TouchableOpacity style={s.successCloseBtn} onPress={onClose}>
+              <Text style={s.successCloseTxt}>Close</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Expand chevron */}
-        <MaterialCommunityIcons
-          name={isExpanded ? 'chevron-up' : 'chevron-down'}
-          size={20}
-          color="#ccc"
-          style={{marginLeft: 4}}
-        />
+        </Animated.View>
       </View>
+    </Modal>
+  );
+};
 
-      {/* ── Expanded Details ── */}
-      {isExpanded && (
-        <View style={styles.expandedSection}>
-          <View style={styles.expandedDivider} />
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) => {
+  const { fetchAPI } = useAuth();
 
-          <View style={styles.expandedGrid}>
-            <DetailItem icon="phone-outline"     label="Phone"   value={visit.phone} />
-            <DetailItem icon="calendar-outline"  label="Date"    value={visit.date} />
-            {visit.checkIn  && <DetailItem icon="login"   label="Check In"  value={visit.checkIn} />}
-            {visit.checkOut && <DetailItem icon="logout"  label="Check Out" value={visit.checkOut} />}
-          </View>
+  // ── useGeo replaces: location, locationLoading, locationAttempts,
+  //    geocoding, reverseGeocode(), getCurrentLocation(), and its useEffect.
+  //
+  //    address.short  → auto-fill locationName
+  //    latitude/longitude → submitted with the form
+  //    loading  → shown in the map refresh button / overlay
+  //    error    → shown in the map overlay
+  //    gpsOff   → true when 503 / null-location; alerts are already shown
+  //               by the hook so no extra Alert.alert() is needed here
+  // ──────────────────────────────────────────────────────────────────────────
+  const {
+    latitude,
+    longitude,
+    accuracy,
+    address:    geoAddress,
+    loading:    locationLoading,
+    error:      locationError,
+    gpsOff,
+    fetchLocation,
+  } = useGeo();
 
-          {visit.notes && (
-            <View style={styles.notesBox}>
-              <MaterialCommunityIcons name="note-text-outline" size={14} color="#3b5bdb" />
-              <Text style={styles.notesText}>{visit.notes}</Text>
+  // Auto-fill locationName from reverse-geocoded address (once, when it arrives)
+  const autoFilledRef = useRef(false);
+  useEffect(() => {
+    if (geoAddress?.short && !autoFilledRef.current) {
+      setFormData(prev =>
+        prev.locationName.trim() === ''
+          ? { ...prev, locationName: geoAddress.short }
+          : prev
+      );
+      autoFilledRef.current = true;
+    }
+  }, [geoAddress]);
+
+  // Reset auto-fill flag if the user manually clears the field so it can
+  // re-populate if they hit Refresh and get a new address.
+  // (handled implicitly: autoFilledRef stays false after reset())
+
+  // Kick off location fetch on mount
+  useEffect(() => { fetchLocation(); }, []);
+
+  // ── Other screen state ────────────────────────────────────────────────────
+  const [loading,          setLoading]          = useState(false);
+  const [imageData,        setImageData]        = useState<ImageData | null>(null);
+  const [preview,          setPreview]          = useState<string | null>(null);
+  const [isLeadCreated,    setIsLeadCreated]    = useState<'yes'|'no'|'other'>('no');
+  const [submitError,      setSubmitError]      = useState<string | null>(null);
+  const [success,          setSuccess]          = useState(false);
+  const [createdVisit,     setCreatedVisit]     = useState<any>(null);
+  const [validationErrors, setValidationErrors] = useState<any>({});
+  const [snack,            setSnack]            = useState<{ msg:string; type:any }|null>(null);
+  const [punchInAddress,   setPunchInAddress]   = useState<string | null>(null);
+  const [punchInTime,      setPunchInTime]      = useState<string | null>(null);
+  const [suggestions,      setSuggestions]      = useState<any[]>([]);
+  const [showSuggestions,  setShowSuggestions]  = useState(false);
+  const [searchingLeads,   setSearchingLeads]   = useState(false);
+
+  const [formData, setFormData] = useState<FormData>({
+    locationName:'', remarks:'', contactPerson:'', phone:'', email:'',
+  });
+
+  const showSnack = useCallback((msg: string, type: any = 'success') => {
+    setSnack({ msg, type });
+    setTimeout(() => setSnack(null), 3000);
+  }, []);
+
+  // ── Punch-in fetch ────────────────────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const data  = await fetchAPI(`/attendance?startDate=${today}&endDate=${today}&limit=1`, { method:'GET' });
+        const list  = data?.result?.attendances || data?.attendances || [];
+        const att   = Array.isArray(list) ? list[0] : list;
+        if (att?.punchIn?.time && !att?.punchOut?.time) {
+          const addr = att.punchIn?.address;
+          setPunchInAddress(typeof addr==='string' ? addr : addr?.full || addr?.short || null);
+          setPunchInTime(att.punchIn.time);
+        }
+      } catch (e: any) { console.warn('Punch-in fetch failed:', e.message); }
+    })();
+  }, [fetchAPI]);
+
+  // ── Lead autocomplete ─────────────────────────────────────────────────────
+  const searchLeads = useCallback(async (query: string) => {
+    if (!query || query.trim().length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
+    try {
+      setSearchingLeads(true);
+      const data = await fetchAPI(`/lead/getAll?search=${encodeURIComponent(query)}&limit=5`, { method:'GET' });
+      const leads = data?.result?.leads || data?.result || [];
+      setSuggestions(leads);
+      setShowSuggestions(leads.length > 0);
+    } catch (e) { console.warn('Lead search failed:', e); }
+    finally { setSearchingLeads(false); }
+  }, [fetchAPI]);
+
+  const handleSelectSuggestion = (lead: any) => {
+    setFormData(prev => ({
+      ...prev,
+      contactPerson: `${lead.firstName} ${lead.lastName}`.trim(),
+      phone: lead.phone || '',
+      email: lead.email || '',
+    }));
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  // ── Camera ────────────────────────────────────────────────────────────────
+  const handleCameraCapture = useCallback(async () => {
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, {
+        title:'Camera Permission', message:'Required to take a site photo.',
+        buttonPositive:'Allow', buttonNegative:'Deny',
+      });
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) { showSnack('Camera permission denied.', 'error'); return; }
+    }
+    launchCamera(
+      { mediaType:'photo', quality:0.8, maxWidth:1920, maxHeight:1080, saveToPhotos:false },
+      (response) => {
+        if (response.didCancel) return;
+        if (response.errorCode) { showSnack(response.errorMessage || 'Camera error', 'error'); return; }
+        const asset = response.assets?.[0];
+        if (!asset?.uri) return;
+        if (asset.fileSize && asset.fileSize > 10*1024*1024) { showSnack('Image must be under 10 MB', 'error'); return; }
+        setImageData({ uri:asset.uri, type:asset.type||'image/jpeg', name:asset.fileName||`visit_${Date.now()}.jpg` });
+        setPreview(asset.uri);
+        setValidationErrors((p: any) => ({ ...p, photo:'' }));
+      }
+    );
+  }, [showSnack]);
+
+  const handleRemovePhoto = () => { setImageData(null); setPreview(null); };
+
+  // ── Form helpers ──────────────────────────────────────────────────────────
+  const handleChange = (field: keyof FormData) => (val: string) => {
+    setFormData(p => ({ ...p, [field]:val }));
+    if (validationErrors[field]) setValidationErrors((p: any) => ({ ...p, [field]:'' }));
+  };
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  const validate = (): boolean => {
+    const errors: any = {};
+    if (!imageData)                    errors.photo        = 'Please capture a photo';
+    if (!formData.locationName.trim()) errors.locationName = 'Location name is required';
+    if (latitude === null || longitude === null) errors.location = 'Location coordinates are required';
+    if (isLeadCreated === 'yes') {
+      if (!formData.contactPerson.trim()) errors.contactPerson = 'Contact person is required';
+      if (formData.phone && !/^[0-9+\-\s()]{10,15}$/.test(formData.phone)) errors.phone = 'Enter a valid phone number';
+      if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = 'Enter a valid email';
+    }
+    if (isLeadCreated === 'other' && !formData.remarks.trim()) errors.remarks = 'Please enter a description for this visit';
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  const handleSubmit = async () => {
+    if (!validate()) { showSnack('Please fill all required fields correctly', 'error'); return; }
+    setLoading(true);
+    setSubmitError(null);
+    try {
+      const fd = new FormData();
+      fd.append('latitude',     latitude!.toString());
+      fd.append('longitude',    longitude!.toString());
+      fd.append('locationName', formData.locationName.trim());
+      fd.append('isLeadCreated',isLeadCreated);
+      if (formData.remarks.trim())       fd.append('remarks',       formData.remarks.trim());
+      if (formData.contactPerson.trim()) fd.append('contactPerson', formData.contactPerson.trim());
+      if (formData.phone.trim())         fd.append('phone',         formData.phone.trim());
+      if (formData.email.trim())         fd.append('email',         formData.email.trim());
+      fd.append('photos', { uri:imageData!.uri, type:imageData!.type, name:imageData!.name } as any);
+
+      const visitJson = await fetchAPI('/visit', { method:'POST', body:fd });
+
+      const nameSource = formData.contactPerson.trim() || formData.locationName.trim() || 'Unknown';
+      const parts = nameSource.split(' ');
+      const leadPayload: any = {
+        firstName: parts[0]||'Unknown', lastName: parts.slice(1).join(' ')||'Visit',
+        visitLocation: formData.locationName.trim(), visitNotes: formData.remarks.trim(),
+        visitStatus:'Completed', status:'Visit',
+      };
+      if (formData.phone.trim()) leadPayload.phone = formData.phone.trim();
+      if (formData.email.trim()) leadPayload.email = formData.email.trim();
+      try { await fetchAPI('/lead/create', { method:'POST', body:JSON.stringify(leadPayload) }); }
+      catch { console.warn('Lead save failed (non-critical)'); }
+
+      const visitData = visitJson.data || visitJson;
+      setCreatedVisit(visitData);
+      setSuccess(true);
+      if (onSave) onSave(visitData);
+      setImageData(null); setPreview(null);
+      setFormData({ locationName:'', remarks:'', contactPerson:'', phone:'', email:'' });
+      setIsLeadCreated('no');
+      autoFilledRef.current = false; // allow re-fill on next open
+    } catch (err: any) {
+      setSubmitError(err.message || 'Failed to create visit');
+      showSnack(err.message || 'Failed to create visit', 'error');
+    } finally { setLoading(false); }
+  };
+
+  // latitude/longitude come from useGeo; both must be non-null to enable submit
+  const hasCoords = latitude !== null && longitude !== null;
+  const canSubmit  = !loading && hasCoords && !!imageData && !!formData.locationName.trim();
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+  return (
+    <View style={s.screen}>
+      <StatusBar barStyle="light-content" backgroundColor={PRIMARY} />
+
+      {/* Header */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={onBackPress || onClose} style={s.backBtn}>
+          <MaterialIcons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <View style={{ flex:1, marginLeft:12 }}>
+          <Text style={s.headerTitle}>Create New Visit</Text>
+          <Text style={s.headerDate}>{new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })}</Text>
+        </View>
+      </View>
+      <View style={s.headerGradientLine} />
+
+      {snack && <SnackBar msg={snack.msg} type={snack.type} />}
+
+      <KeyboardAvoidingView behavior={Platform.OS==='ios' ? 'padding' : undefined} style={{ flex:1 }}>
+        <ScrollView style={{ flex:1 }} contentContainerStyle={s.body} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+          {/* Punch-in banner */}
+          {punchInAddress && (
+            <View style={s.punchBanner}>
+              <View style={s.pulseDot} />
+              <MaterialCommunityIcons name="map-marker" size={14} color="#16a34a" />
+              <View style={{ flex:1, marginLeft:6 }}>
+                <Text style={s.punchAddr} numberOfLines={1}>{punchInAddress}</Text>
+                {punchInTime && (
+                  <Text style={s.punchTime}>
+                    On duty since {new Date(punchInTime).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+                  </Text>
+                )}
+              </View>
+              <View style={s.onDutyBadge}><Text style={s.onDutyText}>On Duty</Text></View>
             </View>
           )}
 
-          {/* Action buttons */}
-          <View style={styles.expandedActions}>
-            <TouchableOpacity style={styles.actionBtn}>
-              <MaterialCommunityIcons name="phone" size={16} color="#3b5bdb" />
-              <Text style={styles.actionBtnText}>Call</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionBtn}>
-              <MaterialCommunityIcons name="navigation-outline" size={16} color="#3b5bdb" />
-              <Text style={styles.actionBtnText}>Navigate</Text>
-            </TouchableOpacity>
-            {visit.status === 'Scheduled' && (
-              <TouchableOpacity style={[styles.actionBtn, styles.actionBtnPrimary]} onPress={onCheckIn}>
-                <MaterialCommunityIcons name="login" size={16} color="#fff" />
-                <Text style={[styles.actionBtnText, {color: '#fff'}]}>Check In</Text>
+          {/* ── Camera ── */}
+          <SectionCard>
+            <SectionTitle icon="camera" label="Site Photo"
+              badge={imageData ? 'Captured' : 'Required'}
+              badgeColor={imageData ? 'success' : 'error'} />
+            {preview ? (
+              <View style={s.previewWrap}>
+                <Image source={{ uri:preview }} style={s.previewImage} resizeMode="cover" />
+                <View style={s.previewOverlay}>
+                  <TouchableOpacity style={s.previewBtn} onPress={handleCameraCapture}>
+                    <MaterialCommunityIcons name="camera-retake" size={18} color="#fff" />
+                    <Text style={s.previewBtnTxt}>Retake</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.previewBtn, { backgroundColor:rgba(ERROR_COL,0.85) }]} onPress={handleRemovePhoto}>
+                    <MaterialCommunityIcons name="delete" size={18} color="#fff" />
+                    <Text style={s.previewBtnTxt}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={s.uploadArea} onPress={handleCameraCapture} activeOpacity={0.8}>
+                <MaterialCommunityIcons name="camera-plus" size={48} color={rgba(PRIMARY,0.5)} />
+                <Text style={s.uploadTitle}>Tap to open camera</Text>
+                <Text style={s.uploadSub}>Take a photo of the site · Max 10 MB</Text>
+                <View style={s.uploadBtn}>
+                  <MaterialCommunityIcons name="camera" size={16} color="#fff" />
+                  <Text style={s.uploadBtnTxt}>Open Camera</Text>
+                </View>
               </TouchableOpacity>
             )}
+            {validationErrors.photo ? <Text style={s.errorText}>{validationErrors.photo}</Text> : null}
+          </SectionCard>
+
+          {/* ── Map ── */}
+          <SectionCard style={{ padding:0, overflow:'hidden' }}>
+            <View style={{ paddingHorizontal:16, paddingTop:16, paddingBottom:8, flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
+              <View style={{ flexDirection:'row', alignItems:'center', gap:6 }}>
+                <MaterialCommunityIcons name="crosshairs-gps" size={18} color={PRIMARY} />
+                <Text style={s.sectionTitleText}>Your Location</Text>
+              </View>
+              {/* fetchLocation() from useGeo — replaces getCurrentLocation() */}
+              <TouchableOpacity onPress={fetchLocation} disabled={locationLoading} style={s.refreshBtn}>
+                {locationLoading
+                  ? <ActivityIndicator size="small" color={PRIMARY} />
+                  : <MaterialCommunityIcons name="refresh" size={16} color={PRIMARY} />}
+                <Text style={s.refreshTxt}>{locationLoading ? 'Locating…' : 'Refresh'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ height:260, position:'relative' }}>
+              {hasCoords ? (
+                <LeafletMap
+                  lat={latitude!}
+                  lng={longitude!}
+                  accuracy={accuracy ?? undefined}
+                  zoom={16}
+                  height={260}
+                  primaryColor={PRIMARY}
+                />
+              ) : locationLoading ? (
+                <View style={s.mapOverlay}>
+                  <ActivityIndicator size="large" color={PRIMARY} />
+                  <Text style={s.mapOverlayTxt}>Getting your location…</Text>
+                </View>
+              ) : (
+                <View style={s.mapOverlay}>
+                  <MaterialCommunityIcons
+                    name={gpsOff ? 'crosshairs-off' : 'map-marker-off'}
+                    size={40} color={ERROR_COL} />
+                  <Text style={[s.mapOverlayTxt, { color:ERROR_COL }]}>
+                    {locationError || 'Failed to get location'}
+                  </Text>
+                  {/* fetchLocation() will show the GPS-off alert again if needed */}
+                  <TouchableOpacity style={s.mapRetryBtn} onPress={fetchLocation}>
+                    <Text style={s.mapRetryTxt}>{gpsOff ? 'Turn on GPS & Retry' : 'Retry'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {hasCoords && (
+              <View style={s.coordInfoRow}>
+                <MaterialCommunityIcons name="check-circle" size={14} color={SUCCESS} />
+                <Text style={s.coordInfoTxt}>{latitude!.toFixed(5)}°, {longitude!.toFixed(5)}°</Text>
+                {accuracy != null && (
+                  <View style={[s.accuracyChip, {
+                    backgroundColor:
+                      accuracy<=20 ? rgba(SUCCESS,0.12) :
+                      accuracy<=50 ? rgba(WARNING,0.12) : rgba(ERROR_COL,0.12),
+                  }]}>
+                    <Text style={[s.accuracyTxt, {
+                      color: accuracy<=20 ? SUCCESS : accuracy<=50 ? WARNING : ERROR_COL,
+                    }]}>±{accuracy.toFixed(0)} m</Text>
+                  </View>
+                )}
+              </View>
+            )}
+            {validationErrors.location
+              ? <Text style={[s.errorText, { marginHorizontal:16, marginBottom:12 }]}>{validationErrors.location}</Text>
+              : null}
+          </SectionCard>
+
+          {/* ── Location Name ── */}
+          <SectionCard>
+            <SectionTitle icon="office-building" label="Location Details" />
+            <View style={s.inputWrap}>
+              <Text style={s.inputLabel}>Location / Business Name *</Text>
+              <View style={[s.inputRow, validationErrors.locationName && s.inputRowError]}>
+                {/* Show spinner while reverse-geocoding (locationLoading covers both GPS + geocode) */}
+                {locationLoading && !hasCoords
+                  ? <ActivityIndicator size="small" color={PRIMARY} style={{ marginRight:8 }} />
+                  : <MaterialCommunityIcons name="map-marker" size={18} color={rgba(PRIMARY,0.5)} style={{ marginRight:8 }} />}
+                <TextInput
+                  style={s.textInput}
+                  value={formData.locationName}
+                  onChangeText={handleChange('locationName')}
+                  placeholder="Auto-filled from GPS or enter manually"
+                  placeholderTextColor="#bbb"
+                  editable={!loading}
+                />
+                {formData.locationName.length > 0 && (
+                  <TouchableOpacity onPress={() => setFormData(p => ({ ...p, locationName:'' }))} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
+                    <MaterialCommunityIcons name="close-circle" size={18} color="#ccc" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              {locationLoading && !hasCoords
+                ? <Text style={s.detectingText}>📍 Detecting location name from GPS…</Text>
+                : null}
+              {validationErrors.locationName ? <Text style={s.errorText}>{validationErrors.locationName}</Text> : null}
+            </View>
+          </SectionCard>
+
+          {/* ── Lead Toggle ── */}
+          <SectionCard>
+            <SectionTitle icon="account-plus" label="New Lead Created?" />
+            <View style={s.radioRow}>
+              {(['yes','no','other'] as const).map(opt => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[s.radioOpt, isLeadCreated===opt && s.radioOptActive]}
+                  onPress={() => { setIsLeadCreated(opt); setSuggestions([]); setShowSuggestions(false); }}
+                  activeOpacity={0.8}
+                >
+                  <View style={[s.radioCircle, isLeadCreated===opt && s.radioCircleActive]}>
+                    {isLeadCreated===opt && <View style={s.radioInner} />}
+                  </View>
+                  <Text style={[s.radioLabel, isLeadCreated===opt && s.radioLabelActive]}>
+                    {opt.charAt(0).toUpperCase()+opt.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </SectionCard>
+
+          {/* ── Contact Fields ── */}
+          {(isLeadCreated==='yes' || isLeadCreated==='no') && (
+            <SectionCard>
+              <SectionTitle icon="account" label="Contact Information"
+                badge={isLeadCreated==='yes' ? 'Lead Created' : 'No Lead'}
+                badgeColor={isLeadCreated==='yes' ? 'success' : 'warning'} />
+              <View style={{ position:'relative' }}>
+                <View style={s.inputWrap}>
+                  <Text style={s.inputLabel}>{isLeadCreated==='yes' ? 'Contact Person *' : 'Contact Person'}</Text>
+                  <View style={[s.inputRow, validationErrors.contactPerson && s.inputRowError]}>
+                    <MaterialCommunityIcons name="account" size={18} color={rgba(PRIMARY,0.5)} style={{ marginRight:8 }} />
+                    <TextInput
+                      style={[s.textInput, { flex:1 }]}
+                      value={formData.contactPerson}
+                      onChangeText={(val) => { handleChange('contactPerson')(val); searchLeads(val); }}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      placeholder="Enter contact name" placeholderTextColor="#bbb" editable={!loading}
+                    />
+                    {searchingLeads && <ActivityIndicator size="small" color={PRIMARY} />}
+                  </View>
+                  {validationErrors.contactPerson ? <Text style={s.errorText}>{validationErrors.contactPerson}</Text> : null}
+                </View>
+                {showSuggestions && suggestions.length > 0 && (
+                  <View style={s.suggestionsBox}>
+                    {suggestions.map((lead, i) => (
+                      <TouchableOpacity key={lead._id}
+                        style={[s.suggestionRow, i<suggestions.length-1 && s.suggestionBorder]}
+                        onPress={() => handleSelectSuggestion(lead)} activeOpacity={0.8}>
+                        <View style={s.suggestionAvatar}>
+                          <Text style={s.suggestionAvatarText}>{lead.firstName?.[0]}{lead.lastName?.[0]}</Text>
+                        </View>
+                        <View style={{ flex:1 }}>
+                          <Text style={s.suggestionName}>{lead.firstName} {lead.lastName}</Text>
+                          <View style={{ flexDirection:'row', gap:8 }}>
+                            {lead.phone && <Text style={s.suggestionMeta}>📞 {lead.phone}</Text>}
+                            {lead.email && <Text style={s.suggestionMeta}>✉ {lead.email}</Text>}
+                          </View>
+                        </View>
+                        {lead.status && (
+                          <View style={s.suggestionChip}><Text style={s.suggestionChipTxt}>{lead.status}</Text></View>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+              <InputField icon="phone" label="Phone Number" value={formData.phone} onChange={handleChange('phone')}
+                placeholder="Enter phone number" error={validationErrors.phone} keyboardType="phone-pad" disabled={loading} />
+              <InputField icon="email" label="Email Address" value={formData.email} onChange={handleChange('email')}
+                placeholder="Enter email" error={validationErrors.email} keyboardType="email-address" disabled={loading} />
+            </SectionCard>
+          )}
+
+          {/* ── Remarks ── */}
+          <SectionCard>
+            <SectionTitle icon="note-text"
+              label={isLeadCreated==='other' ? 'Description' : 'Visit Notes'}
+              badge={isLeadCreated==='other' ? (formData.remarks.trim() ? 'Filled' : 'Required') : undefined}
+              badgeColor={formData.remarks.trim() ? 'success' : 'error'} />
+            <InputField icon="text"
+              label={isLeadCreated==='other' ? 'Description *' : 'Notes (optional)'}
+              value={formData.remarks} onChange={handleChange('remarks')}
+              placeholder={isLeadCreated==='other' ? 'Enter a description of this visit…' : 'Enter any additional notes…'}
+              error={validationErrors.remarks} multiline rows={4} disabled={loading} />
+          </SectionCard>
+
+          {/* Submit-level error (GPS errors are handled by the hook's own alerts) */}
+          {submitError && (
+            <View style={s.errorBanner}>
+              <MaterialCommunityIcons name="alert-circle" size={18} color={ERROR_COL} />
+              <Text style={s.errorBannerTxt}>{submitError}</Text>
+            </View>
+          )}
+
+          <View style={s.actionRow}>
+            <TouchableOpacity style={s.cancelBtn} onPress={onBackPress || onClose} disabled={loading}>
+              <Text style={s.cancelTxt}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.submitBtn, !canSubmit && s.submitBtnDisabled]}
+              onPress={handleSubmit} disabled={!canSubmit} activeOpacity={0.85}>
+              {loading
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <MaterialCommunityIcons name="content-save" size={18} color="#fff" />}
+              <Text style={s.submitTxt}>{loading ? 'Creating Visit…' : 'Create Visit'}</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      )}
-    </TouchableOpacity>
+
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <SuccessModal
+        visible={success} visitData={createdVisit}
+        onClose={() => { setSuccess(false); onClose?.(); }}
+      />
+    </View>
   );
 };
 
-const DetailItem: React.FC<{icon: string; label: string; value: string}> = ({icon, label, value}) => (
-  <View style={styles.detailItem}>
-    <MaterialCommunityIcons name={icon} size={14} color="#3b5bdb" />
-    <View>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
-    </View>
-  </View>
-);
-
-const SummaryChip: React.FC<{icon: string; value: number | string; label: string; color: string; bg: string}> = ({
-  icon, value, label, color, bg,
-}) => (
-  <View style={[styles.summaryChip, {backgroundColor: bg}]}>
-    <MaterialCommunityIcons name={icon} size={18} color={color} />
-    <Text style={[styles.summaryValue, {color}]}>{value}</Text>
-    <Text style={styles.summaryLabel}>{label}</Text>
-  </View>
-);
-
-export default LocationVisitScreen;
+export default CreateVisitScreen;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  screen:     {flex: 1, backgroundColor: '#f0f4ff'},
-
-  topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6, backgroundColor: '#f0f4ff',
-  },
-  menuBtn:      {padding: 4},
-  headerTitle:  {fontSize: 18, fontWeight: '700', color: '#1a1a3e', flex: 1, marginLeft: 10},
-  topBarRight:  {flexDirection: 'row', alignItems: 'center', gap: 8},
-  iconBtn:      {padding: 4},
-  avatar: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#3b5bdb', alignItems: 'center', justifyContent: 'center',
-  },
-  avatarText:   {color: '#fff', fontSize: 13, fontWeight: '700'},
-  blueLine:     {height: 3, backgroundColor: '#3b5bdb'},
-
-  // Map
-  mapPlaceholder: {
-    height: 200, backgroundColor: '#dce8f0', marginHorizontal: 12, marginTop: 14,
-    borderRadius: 16, overflow: 'hidden', position: 'relative',
-  },
-  mapOverlay:  {...StyleSheet.absoluteFillObject, opacity: 0.4},
-  mapGridH:    {position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: '#b0c4d8'},
-  mapGridV:    {position: 'absolute', top: 0, bottom: 0, width: 1, backgroundColor: '#b0c4d8'},
-  mapPin:      {position: 'absolute'},
-  mapRouteLine:{
-    position: 'absolute', top: '38%', left: '25%', width: '40%', height: 2,
-    backgroundColor: '#3b5bdb', opacity: 0.5, borderRadius: 1,
-    transform: [{rotate: '15deg'}],
-  },
-  myLocation: {
-    position: 'absolute', bottom: '30%', left: '43%',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  myLocationOuter: {
-    width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(59,91,219,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  myLocationInner: {width: 10, height: 10, borderRadius: 5, backgroundColor: '#3b5bdb'},
-  mapControls: {
-    position: 'absolute', right: 12, bottom: 12, gap: 8,
-  },
-  mapControlBtn: {
-    width: 36, height: 36, borderRadius: 10, backgroundColor: '#fff',
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2,
-  },
-  mapLabel: {
-    position: 'absolute', bottom: 12, left: 12,
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
-  },
-  mapLabelText: {fontSize: 12, fontWeight: '600', color: '#3b5bdb'},
-
-  // Summary
-  summaryRow:   {flexDirection: 'row', paddingHorizontal: 12, marginTop: 10, gap: 8},
-  summaryChip:  {flex: 1, alignItems: 'center', borderRadius: 12, paddingVertical: 10, gap: 2},
-  summaryValue: {fontSize: 16, fontWeight: '800'},
-  summaryLabel: {fontSize: 10, color: '#888', fontWeight: '500'},
-
-  // Active banner
-  activeBanner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#fff8e1', marginHorizontal: 12, marginTop: 10,
-    borderRadius: 14, padding: 14,
-    borderWidth: 1.5, borderColor: '#ffe082',
-  },
-  activeBannerLeft:  {flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1},
-  pulsingDot: {
-    width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(245,127,23,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  pulsingDotInner: {width: 9, height: 9, borderRadius: 5, backgroundColor: '#f57f17'},
-  activeBannerLabel: {fontSize: 11, color: '#f57f17', fontWeight: '700', textTransform: 'uppercase'},
-  activeBannerName:  {fontSize: 14, fontWeight: '700', color: '#1a1a3e'},
-  activeBannerAddr:  {fontSize: 12, color: '#888'},
-  checkOutBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#e53935', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
-  },
-  checkOutBtnText: {fontSize: 13, fontWeight: '700', color: '#fff'},
-
-  // Filters
-  filterScroll:  {maxHeight: 52, marginTop: 10},
-  filterContent: {paddingHorizontal: 14, paddingVertical: 8, gap: 8, flexDirection: 'row'},
-  filterTab: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 6,
-    backgroundColor: '#fff', borderRadius: 20, borderWidth: 1.5, borderColor: '#e4e8f5',
-  },
-  filterTabActive:     {backgroundColor: '#3b5bdb', borderColor: '#3b5bdb'},
-  filterTabText:       {fontSize: 13, fontWeight: '600', color: '#555'},
-  filterTabTextActive: {color: '#fff'},
-  filterBadge:         {backgroundColor: '#eef1fb', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1},
-  filterBadgeActive:   {backgroundColor: 'rgba(255,255,255,0.25)'},
-  filterBadgeText:     {fontSize: 11, fontWeight: '700', color: '#3b5bdb'},
-  filterBadgeTextActive:{color: '#fff'},
-
-  listHeaderRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 8,
-  },
-  listCount:    {fontSize: 13, color: '#888'},
-  listCountNum: {fontWeight: '700', color: '#3b5bdb'},
-  addBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#3b5bdb', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  addBtnText: {fontSize: 13, fontWeight: '700', color: '#fff'},
-
-  listContainer: {paddingHorizontal: 12, gap: 10},
-
-  // Card
-  card: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 14, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: {width: 0, height: 1}, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
-    marginBottom: 0,
-  },
-  cardActive:    {borderWidth: 1.5, borderColor: '#ffe082'},
-  activeStrip:   {position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: '#f57f17', borderTopLeftRadius: 14, borderBottomLeftRadius: 14},
-  cardMain:      {flexDirection: 'row', alignItems: 'flex-start'},
-  cardAvatar: {
-    width: 42, height: 42, borderRadius: 21,
-    alignItems: 'center', justifyContent: 'center', marginRight: 12,
-  },
-  cardAvatarText: {fontSize: 13, fontWeight: '700'},
-  cardInfo:     {flex: 1},
-  cardTopRow:   {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4},
-  cardName:     {fontSize: 15, fontWeight: '700', color: '#1a1a3e', flex: 1, marginRight: 8},
-  visitTypePill:{paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8},
-  visitTypeText:{fontSize: 11, fontWeight: '700'},
-  cardMeta:     {flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6},
-  cardMetaText: {fontSize: 12, color: '#888', flex: 1},
-  cardBottomRow:{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
-  statusBadge:  {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1,
-  },
-  statusText:   {fontSize: 11, fontWeight: '700'},
-  cardMetaRight:{alignItems: 'flex-end', gap: 2},
-  timeText:     {fontSize: 11, color: '#888'},
-  distRow:      {flexDirection: 'row', alignItems: 'center', gap: 3},
-  distText:     {fontSize: 11, color: '#aaa'},
-
-  // Expanded
-  expandedSection: {marginTop: 12},
-  expandedDivider: {height: 1, backgroundColor: '#f0f0f0', marginBottom: 12},
-  expandedGrid:    {flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 10},
-  detailItem:      {flexDirection: 'row', alignItems: 'flex-start', gap: 6, width: '45%'},
-  detailLabel:     {fontSize: 10, color: '#aaa', fontWeight: '500'},
-  detailValue:     {fontSize: 13, color: '#333', fontWeight: '600'},
-  notesBox: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
-    backgroundColor: '#f8f9ff', borderRadius: 10, padding: 10, marginBottom: 12,
-  },
-  notesText: {fontSize: 12, color: '#555', flex: 1, lineHeight: 18},
-  expandedActions: {flexDirection: 'row', gap: 8},
-  actionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#eef1fb', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
-  },
-  actionBtnPrimary: {backgroundColor: '#3b5bdb'},
-  actionBtnText:    {fontSize: 13, fontWeight: '600', color: '#3b5bdb'},
+const s = StyleSheet.create({
+  screen:{ flex:1, backgroundColor:BG },
+  header:{ flexDirection:'row', alignItems:'center', backgroundColor:PRIMARY, paddingHorizontal:16, paddingTop:Platform.OS==='ios'?56:14, paddingBottom:14 },
+  backBtn:{ width:36, height:36, borderRadius:18, backgroundColor:'rgba(255,255,255,0.15)', alignItems:'center', justifyContent:'center' },
+  headerTitle:{ fontSize:18, fontWeight:'800', color:'#fff', letterSpacing:-0.3 },
+  headerDate:{ fontSize:11, color:'rgba(255,255,255,0.75)', marginTop:2 },
+  headerGradientLine:{ height:3, backgroundColor:SECONDARY },
+  snackBar:{ flexDirection:'row', alignItems:'center', gap:8, marginHorizontal:12, marginTop:8, padding:12, borderRadius:12 },
+  snackText:{ fontSize:13, fontWeight:'600', flex:1 },
+  body:{ padding:14, gap:14, paddingBottom:40 },
+  punchBanner:{ flexDirection:'row', alignItems:'center', backgroundColor:'#f0fdf4', borderWidth:1, borderColor:'#bbf7d0', borderRadius:12, paddingHorizontal:12, paddingVertical:10, gap:8 },
+  pulseDot:{ width:9, height:9, borderRadius:5, backgroundColor:'#22c55e', flexShrink:0 },
+  punchAddr:{ fontSize:12, fontWeight:'700', color:'#14532d' },
+  punchTime:{ fontSize:11, color:'#16a34a', marginTop:1 },
+  onDutyBadge:{ paddingHorizontal:8, paddingVertical:3, borderRadius:20, borderWidth:1, borderColor:'#86efac' },
+  onDutyText:{ fontSize:10, fontWeight:'800', color:'#16a34a' },
+  sectionCard:{ backgroundColor:'#fff', borderRadius:16, padding:16, shadowColor:'#000', shadowOffset:{ width:0, height:2 }, shadowOpacity:0.04, shadowRadius:8, elevation:2 },
+  sectionTitleRow:{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:14 },
+  sectionTitleText:{ fontSize:14, fontWeight:'700', color:PRIMARY, flex:1 },
+  badge:{ paddingHorizontal:8, paddingVertical:3, borderRadius:20 },
+  badgeText:{ fontSize:10, fontWeight:'700' },
+  uploadArea:{ borderWidth:2, borderColor:rgba(PRIMARY,0.25), borderStyle:'dashed', borderRadius:14, padding:32, alignItems:'center', backgroundColor:rgba(PRIMARY,0.02) },
+  uploadTitle:{ fontSize:15, fontWeight:'700', color:PRIMARY, marginTop:12 },
+  uploadSub:{ fontSize:12, color:'#aaa', marginTop:4, textAlign:'center' },
+  uploadBtn:{ flexDirection:'row', alignItems:'center', gap:6, marginTop:16, backgroundColor:PRIMARY, paddingHorizontal:20, paddingVertical:10, borderRadius:10 },
+  uploadBtnTxt:{ fontSize:13, fontWeight:'700', color:'#fff' },
+  previewWrap:{ borderRadius:14, overflow:'hidden', height:240 },
+  previewImage:{ width:'100%', height:'100%' },
+  previewOverlay:{ position:'absolute', bottom:0, left:0, right:0, flexDirection:'row', justifyContent:'space-between', padding:12, backgroundColor:'rgba(0,0,0,0.4)' },
+  previewBtn:{ flexDirection:'row', alignItems:'center', gap:5, backgroundColor:rgba(PRIMARY,0.85), paddingHorizontal:14, paddingVertical:8, borderRadius:8 },
+  previewBtnTxt:{ fontSize:13, fontWeight:'600', color:'#fff' },
+  inputWrap:{ marginBottom:12 },
+  inputLabel:{ fontSize:12, fontWeight:'600', color:'#555', marginBottom:6 },
+  inputRow:{ flexDirection:'row', alignItems:'center', borderWidth:1, borderColor:'#e0e7ff', borderRadius:10, paddingHorizontal:12, paddingVertical:10, backgroundColor:'#fafbff' },
+  inputRowError:{ borderColor:ERROR_COL },
+  inputRowDisabled:{ opacity:0.6 },
+  textInput:{ flex:1, fontSize:14, color:'#1a1a3e', padding:0 },
+  errorText:{ fontSize:11, color:ERROR_COL, marginTop:4 },
+  detectingText:{ fontSize:11, color:PRIMARY, marginTop:4 },
+  radioRow:{ flexDirection:'row', gap:10 },
+  radioOpt:{ flex:1, flexDirection:'row', alignItems:'center', gap:7, padding:12, borderRadius:10, borderWidth:1.5, borderColor:'#e0e7ff', backgroundColor:'#fafbff' },
+  radioOptActive:{ borderColor:PRIMARY, backgroundColor:rgba(PRIMARY,0.06) },
+  radioCircle:{ width:18, height:18, borderRadius:9, borderWidth:2, borderColor:'#ccc', alignItems:'center', justifyContent:'center' },
+  radioCircleActive:{ borderColor:PRIMARY },
+  radioInner:{ width:9, height:9, borderRadius:5, backgroundColor:PRIMARY },
+  radioLabel:{ fontSize:13, fontWeight:'600', color:'#555' },
+  radioLabelActive:{ color:PRIMARY },
+  suggestionsBox:{ position:'absolute', top:'100%', left:0, right:0, backgroundColor:'#fff', borderRadius:10, zIndex:999, elevation:12, shadowColor:'#000', shadowOffset:{ width:0, height:4 }, shadowOpacity:0.12, shadowRadius:8, borderWidth:1, borderColor:rgba(PRIMARY,0.15), marginTop:2 },
+  suggestionRow:{ flexDirection:'row', alignItems:'center', padding:12, gap:10 },
+  suggestionBorder:{ borderBottomWidth:1, borderBottomColor:rgba(PRIMARY,0.08) },
+  suggestionAvatar:{ width:36, height:36, borderRadius:18, backgroundColor:rgba(PRIMARY,0.12), alignItems:'center', justifyContent:'center' },
+  suggestionAvatarText:{ fontSize:11, fontWeight:'800', color:PRIMARY },
+  suggestionName:{ fontSize:13, fontWeight:'700', color:'#1a1a3e' },
+  suggestionMeta:{ fontSize:11, color:'#888' },
+  suggestionChip:{ paddingHorizontal:8, paddingVertical:3, borderRadius:20, backgroundColor:rgba(PRIMARY,0.1) },
+  suggestionChipTxt:{ fontSize:10, fontWeight:'700', color:PRIMARY },
+  mapOverlay:{ ...StyleSheet.absoluteFillObject, zIndex:100, backgroundColor:'rgba(255,255,255,0.88)', alignItems:'center', justifyContent:'center', gap:10 },
+  mapOverlayTxt:{ fontSize:13, color:'#555', textAlign:'center', paddingHorizontal:20 },
+  mapRetryBtn:{ backgroundColor:PRIMARY, paddingHorizontal:20, paddingVertical:8, borderRadius:8, marginTop:4 },
+  mapRetryTxt:{ fontSize:13, fontWeight:'700', color:'#fff' },
+  refreshBtn:{ flexDirection:'row', alignItems:'center', gap:4, paddingHorizontal:12, paddingVertical:6, borderRadius:8, backgroundColor:rgba(PRIMARY,0.08) },
+  refreshTxt:{ fontSize:12, fontWeight:'600', color:PRIMARY },
+  coordInfoRow:{ flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:16, paddingVertical:10, backgroundColor:rgba(PRIMARY,0.03) },
+  coordInfoTxt:{ fontSize:12, fontWeight:'600', color:'#333', flex:1, fontFamily:Platform.OS==='ios'?'Courier':'monospace' },
+  accuracyChip:{ paddingHorizontal:8, paddingVertical:3, borderRadius:20 },
+  accuracyTxt:{ fontSize:11, fontWeight:'700' },
+  errorBanner:{ flexDirection:'row', alignItems:'flex-start', gap:8, backgroundColor:'#fee2e2', borderRadius:10, padding:12 },
+  errorBannerTxt:{ flex:1, fontSize:13, color:ERROR_COL, lineHeight:18 },
+  actionRow:{ flexDirection:'row', gap:12, marginTop:8 },
+  cancelBtn:{ flex:1, paddingVertical:14, borderRadius:12, borderWidth:1.5, borderColor:PRIMARY, alignItems:'center' },
+  cancelTxt:{ fontSize:14, fontWeight:'600', color:PRIMARY },
+  submitBtn:{ flex:2, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:8, paddingVertical:14, borderRadius:12, backgroundColor:PRIMARY },
+  submitBtnDisabled:{ backgroundColor:rgba(PRIMARY,0.35) },
+  submitTxt:{ fontSize:14, fontWeight:'800', color:'#fff' },
+  modalOverlay:{ flex:1, backgroundColor:'rgba(0,0,0,0.5)', alignItems:'center', justifyContent:'center', paddingHorizontal:24 },
+  successCard:{ backgroundColor:'#fff', borderRadius:24, padding:28, width:'100%', alignItems:'center' },
+  successIconWrap:{ width:80, height:80, borderRadius:40, backgroundColor:rgba(SUCCESS,0.12), alignItems:'center', justifyContent:'center', marginBottom:16 },
+  successTitle:{ fontSize:20, fontWeight:'800', color:'#1a1a3e', marginBottom:6, textAlign:'center' },
+  successSub:{ fontSize:13, color:'#888', marginBottom:16, textAlign:'center' },
+  successImage:{ width:'100%', height:180, borderRadius:12, marginBottom:12 },
+  successInfoRow:{ flexDirection:'row', alignItems:'center', gap:6, marginBottom:12 },
+  successInfoText:{ fontSize:14, fontWeight:'600', color:'#1a1a3e', flex:1 },
+  coordRow:{ flexDirection:'row', gap:10, width:'100%', marginBottom:20 },
+  coordBox:{ flex:1, backgroundColor:rgba(PRIMARY,0.05), borderRadius:10, padding:12 },
+  coordLabel:{ fontSize:11, color:'#888', marginBottom:3 },
+  coordVal:{ fontSize:13, fontWeight:'700', color:'#1a1a3e' },
+  successBtns:{ flexDirection:'row', gap:12, width:'100%' },
+  successCloseBtn:{ flex:1, paddingVertical:14, borderRadius:12, borderWidth:1.5, borderColor:PRIMARY, alignItems:'center' },
+  successCloseTxt:{ fontSize:14, fontWeight:'600', color:PRIMARY },
 });

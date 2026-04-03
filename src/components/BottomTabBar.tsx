@@ -1,7 +1,10 @@
 import React from 'react';
 import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
+
+
+
+import { BOTTOM_TABS } from '../data';
 import VIcon from './VIcon';
-import {BOTTOM_TABS} from '../data';
 
 interface BottomTabBarProps {
   activeTab: string;
