@@ -48,8 +48,7 @@ const MemStore = {
    CONTEXT SETUP
 ───────────────────────────────────────────────────────────── */
 const AuthContext = createContext<any>({});
-// const API_BASE_URL = 'https://solar-backend-4bsb.onrender.com/api/v1';
-const API_BASE_URL = 'http://10.0.2.2:9001/api/v1';
+const API_BASE_URL = 'https://solar-backend-4bsb.onrender.com/api/v1';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
