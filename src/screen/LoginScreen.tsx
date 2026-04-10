@@ -224,8 +224,8 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
 
       if (!userRole) throw new Error('User role not found in response');
 
-      if (!['Head_office', 'ZSM', 'ASM', 'TEAM'].includes(userRole)) {
-        throw new Error('You do not have permission to access this system');
+      if (userRole !== 'TEAM') {
+        throw new Error('Only TEAM members can login in this app');
       }
 
       setAttemptCount(0);
@@ -238,13 +238,16 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
     } catch (err: any) {
       const message      = err.message || 'An unexpected error occurred';
       const isPermission = message.toLowerCase().includes('permission');
-      const isNetwork    = message.toLowerCase().includes('network') ||
-                           message.toLowerCase().includes('fetch');
+      const lowerMessage = message.toLowerCase();
+      const isNetwork    = lowerMessage.includes('network') ||
+                           lowerMessage.includes('fetch') ||
+                           lowerMessage.includes('respond') ||
+                           lowerMessage.includes('timeout');
 
       if (!isPermission) setAttemptCount(prev => prev + 1);
 
       setLocalError(
-        isNetwork    ? 'Network error. Please check your internet connection.' :
+        isNetwork    ? 'Server is slow or unreachable. Please check your internet and try again in a minute.' :
         isPermission ? 'You do not have permission to access this system.'     :
         message
       );

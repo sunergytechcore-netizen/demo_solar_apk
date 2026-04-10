@@ -1,7 +1,7 @@
 // src/contexts/AuthContext.tsx
 // ─── NO native dependencies — uses a pure in-memory key-value store ───────────
 // Drop-in replacement for AsyncStorage. Swap in MMKV or AsyncStorage later
-// by changing only the 4 lines inside `MemStore`.
+// by changing only the 4 lines inside `Storage`.
 
 import React, {
   createContext,
@@ -10,6 +10,11 @@ import React, {
   useEffect,
   useCallback,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  startAttendanceLocationTracking,
+  stopAttendanceLocationTracking,
+} from '../services/attendanceLocationTracker';
 
 /* ─────────────────────────────────────────────────────────────
    IN-MEMORY STORE  (mimics AsyncStorage API — async get/set/clear)
@@ -20,35 +25,64 @@ import React, {
 
    🔄  To upgrade to real persistence later, replace this block with:
          import AsyncStorage from '@react-native-async-storage/async-storage';
-         const MemStore = AsyncStorage;
+         const Storage = AsyncStorage;
 ───────────────────────────────────────────────────────────── */
-const _store: Record<string, string> = {};
-
-const MemStore = {
-  getItem: (key: string): Promise<string | null> =>
-    Promise.resolve(_store[key] ?? null),
-
-  setItem: (key: string, value: string): Promise<void> => {
-    _store[key] = value;
-    return Promise.resolve();
-  },
-
-  removeItem: (key: string): Promise<void> => {
-    delete _store[key];
-    return Promise.resolve();
-  },
-
-  clear: (): Promise<void> => {
-    Object.keys(_store).forEach(k => delete _store[k]);
-    return Promise.resolve();
-  },
-};
+const Storage = AsyncStorage;
 
 /* ─────────────────────────────────────────────────────────────
    CONTEXT SETUP
 ───────────────────────────────────────────────────────────── */
 const AuthContext = createContext<any>({});
-const API_BASE_URL = 'https://solar-backend-4bsb.onrender.com/api/v1';
+const API_BASE_URL = 'http://localhost:9001/api/v1';
+const API_TIMEOUT_MS = 45_000;
+const APP_ALLOWED_ROLE = 'TEAM';
+
+const parseResponseBody = async (response: Response) => {
+  const rawText = await response.text();
+  if (!rawText) return null;
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { message: rawText };
+  }
+};
+
+const pickFirstString = (...values: any[]) =>
+  values.find(value => typeof value === 'string' && value.trim().length > 0) || null;
+
+const extractAuthPayload = (payload: any) => {
+  const result = payload?.result ?? payload?.data ?? payload;
+  const user =
+    result?.user ??
+    result?.employee ??
+    result?.admin ??
+    payload?.user ??
+    payload?.employee ??
+    payload?.admin ??
+    result;
+
+  const token = pickFirstString(
+    result?.token,
+    result?.accessToken,
+    result?.authToken,
+    payload?.token,
+    payload?.accessToken,
+    payload?.authToken,
+  );
+
+  const role = pickFirstString(
+    user?.role,
+    user?.userRole,
+    user?.employeeRole,
+    user?.designation,
+  );
+
+  return {
+    token,
+    user: role && !user?.role ? { ...user, role } : user,
+  };
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -66,12 +100,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
      CHECK AUTHENTICATION
   ═══════════════════════════════ */
   const isAuthenticated = useCallback(async () => {
-    const token     = await MemStore.getItem('token');
-    const savedUser = await MemStore.getItem('user');
+    const token     = await Storage.getItem('token');
+    const savedUser = await Storage.getItem('user');
     if (!token || !savedUser) return false;
     try {
       const parsed = JSON.parse(savedUser);
-      return !!(parsed?.email && parsed?.role);
+      return !!(parsed?.email && parsed?.role === APP_ALLOWED_ROLE);
     } catch {
       return false;
     }
@@ -83,11 +117,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const token     = await MemStore.getItem('token');
-        const savedUser = await MemStore.getItem('user');
+        const token     = await Storage.getItem('token');
+        const savedUser = await Storage.getItem('user');
         if (token && savedUser) {
           const parsed = JSON.parse(savedUser);
-          if (parsed?.email && parsed?.role) setUser(parsed);
+          if (parsed?.email && parsed?.role === APP_ALLOWED_ROLE) {
+            setUser(parsed);
+          } else {
+            await Storage.multiRemove(['token', 'user']);
+            setUser(null);
+          }
         }
       } catch (err) {
         console.error('Auth init error:', err);
@@ -102,13 +141,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
      API HELPER
   ═══════════════════════════════ */
   const fetchAPI = useCallback(async (endpoint: string, options: any = {}) => {
-    const token      = await MemStore.getItem('token');
+    const token      = await Storage.getItem('token');
     const isFormData = options.body instanceof FormData;
-
-    console.log("token",token)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
     const config = {
       ...options,
+      signal: controller.signal,
       headers: {
         ...(!isFormData && { 'Content-Type': 'application/json' }),
         ...(token        && { Authorization: `Bearer ${token}` }),
@@ -118,20 +158,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-      const data     = await response.json();
+      const data     = await parseResponseBody(response);
 
       if (!response.ok) {
         if (response.status === 401) {
-          await MemStore.clear();
+          await Storage.multiRemove(['token', 'user']);
           setUser(null);
         }
-        throw new Error(data.message || 'Request failed');
+        throw new Error(
+          data?.message ||
+          data?.error ||
+          `Request failed with status ${response.status}`,
+        );
       }
 
       return data;
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Server is taking too long to respond. Please try again in a moment.');
+      }
       console.error(`API Error [${endpoint}]:`, err.message);
       throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }, []);
 
@@ -150,6 +199,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     [fetchAPI],
   );
 
+  const getTrackingConfig = useCallback(async () => {
+    const token = await Storage.getItem('token');
+    return {
+      apiBaseUrl: API_BASE_URL,
+      token,
+    };
+  }, []);
+
   /* ═══════════════════════════════
      LOGIN
   ═══════════════════════════════ */
@@ -163,13 +220,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         body: JSON.stringify({ email, password }),
       });
 
-      const token    = response.result?.token || response.token;
-      const userData = response.result?.user  || response.result || response;
+      const { token, user: userData } = extractAuthPayload(response);
 
       if (!token) throw new Error('No token received');
+      if (!userData || typeof userData !== 'object') {
+        throw new Error('User details not found in login response');
+      }
+      if (userData?.role !== APP_ALLOWED_ROLE) {
+        await Storage.multiRemove(['token', 'user']);
+        throw new Error('Only TEAM members can login in this app');
+      }
 
-      await MemStore.setItem('token', token);
-      await MemStore.setItem('user',  JSON.stringify(userData));
+      await Storage.multiSet([
+        ['token', token],
+        ['user', JSON.stringify(userData)],
+      ]);
 
       setUser(userData);
       setSuccess('Login successful');
@@ -187,7 +252,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
      LOGOUT
   ═══════════════════════════════ */
   const logout = useCallback(async () => {
-    await MemStore.clear();
+    await stopAttendanceLocationTracking();
+    await Storage.multiRemove(['token', 'user']);
     setUser(null);
   }, []);
 
@@ -196,7 +262,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   ═══════════════════════════════ */
   const punchIn = useCallback(
     async (locationData: any) => {
-      console.log("location",locationData)
       setLoading(true);
       setError(null);
       try {
@@ -205,6 +270,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           body: JSON.stringify(locationData),
         });
         if (response.success) {
+          const trackingConfig = await getTrackingConfig();
+          await startAttendanceLocationTracking(fetchAPI, trackingConfig);
           setUser((prev: any) => ({
             ...prev,
             lastPunchIn: new Date().toISOString(),
@@ -218,7 +285,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setLoading(false);
       }
     },
-    [fetchAPI],
+    [fetchAPI, getTrackingConfig],
   );
 
   /* ═══════════════════════════════
@@ -234,6 +301,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           body: JSON.stringify(locationData),
         });
         if (response.success) {
+          await stopAttendanceLocationTracking();
           setUser((prev: any) => ({
             ...prev,
             lastPunchOut: new Date().toISOString(),
@@ -274,6 +342,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     punchIn,
     punchOut,
     safeFetchAPI,
+    getTrackingConfig,
     isAuthenticated,
     getUserRole,
     isTeamMember,

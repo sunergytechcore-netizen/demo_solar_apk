@@ -23,7 +23,7 @@ RNLocation.configure({
     ios:     'best',
     android: 'highAccuracy',
   },
-  androidProvider:                  'auto',  // fused on Play devices, GPS elsewhere
+  androidProvider:                  'standard',  // avoid Play Services permission-resolution crashes on some Android ROMs
   interval:                         500,     // ms between updates (Android)
   fastestInterval:                  100,
   maxWaitTime:                      1000,
@@ -80,22 +80,12 @@ const showGpsOffAlert = () =>
  *   caused the false "GPS is Off" alerts.  subscribeToLocationUpdates triggers
  *   an active fix request and resolves as soon as the first update arrives.
  */
-const getLocationOnce = (timeoutMs = 20000): Promise<Location> =>
-  new Promise((resolve, reject) => {
-    let unsubscribe: (() => void) | null = null;
-
-    const timer = setTimeout(() => {
-      unsubscribe?.();
-      reject({ code: 3, message: 'Location timed out after ' + timeoutMs / 1000 + 's' });
-    }, timeoutMs);
-
-    unsubscribe = RNLocation.subscribeToLocationUpdates((locations) => {
-      const loc = locations?.[0];
-      if (!loc) return;           // skip empty batches; wait for a real fix
-      clearTimeout(timer);
-      unsubscribe?.();
-      resolve(loc);
-    });
+export const getFreshLocation = (timeoutMs = 20000): Promise<Location> =>
+  RNLocation.getLatestLocation({ timeout: timeoutMs }).then(location => {
+    if (!location) {
+      throw { code: 3, message: 'Location timed out after ' + timeoutMs / 1000 + 's' };
+    }
+    return location;
   });
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -143,7 +133,7 @@ export const useGeo = () => {
     // (subscribeToLocationUpdates triggers an active fix; getLatestLocation only
     //  reads the OS cache which may be null on first launch / emulator / fresh boot)
     try {
-      const loc = await getLocationOnce(20000);
+      const loc = await getFreshLocation(20000);
 
       const lat      = loc.latitude;
       const lng      = loc.longitude;

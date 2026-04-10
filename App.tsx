@@ -13,7 +13,7 @@ import {
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 // ── Context ───────────────────────────────────────────────────────────────────
-import { AuthProvider } from './src/contexts/AuthContext';
+import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 
 // ── Screens ───────────────────────────────────────────────────────────────────
 import LoginScreen              from './src/screen/LoginScreen';
@@ -85,9 +85,9 @@ interface UserData {
 function AppInner() {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const [isLoggedIn,  setIsLoggedIn]  = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const { user, loading: authLoading, logout } = useAuth();
+  const isLoggedIn = !!user;
+  const currentUser = (user as UserData | null) ?? null;
 
   // ── Navigation ────────────────────────────────────────────────────────────
   const [activeMenu, setActiveMenu] = useState<MenuId>('dashboard');
@@ -103,22 +103,14 @@ function AppInner() {
   const [selectedPeriod,   setSelectedPeriod]   = useState('today');
 
   // ── Boot ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const t = setTimeout(() => setAuthLoading(false), 300);
-    return () => clearTimeout(t);
-  }, []);
-
   // ── Auth handlers ─────────────────────────────────────────────────────────
   const handleLoginSuccess = (userData: UserData) => {
-    setCurrentUser(userData);
-    setIsLoggedIn(true);
     setActiveTab(userData.role === 'TEAM' ? 'attendance' : 'home');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setProfileOpen(false);
-    setCurrentUser(null);
-    setIsLoggedIn(false);
+    await logout();
     setActiveMenu('dashboard');
     setActiveTab('home');
     setSubScreen(null);
@@ -152,6 +144,31 @@ function AppInner() {
     setActiveMenu(id as MenuId);
     if (id === 'dashboard') setActiveTab('home');
     setSidebarOpen(false);
+  };
+
+  const handleQuickActionPress = (id: string) => {
+    setQuickActionsOpen(false);
+    setSubScreen(null);
+
+    switch (id) {
+      case 'newVisit':
+        setActiveMenu('dashboard');
+        setActiveTab('locationVisit');
+        break;
+      case 'registration':
+        setActiveMenu('registration');
+        break;
+      case 'bankLoan':
+        setActiveMenu('bankLoan');
+        break;
+      case 'document':
+        setActiveMenu('document');
+        break;
+      default:
+        setActiveMenu('dashboard');
+        setActiveTab('home');
+        break;
+    }
   };
 
   /* ── Splash ──────────────────────────────────────────────────────────────── */
@@ -192,7 +209,7 @@ function AppInner() {
             selectedPeriod={selectedPeriod}
             onViewTotalVisits={()     => setActiveTab('totalVisits')}
             onViewRegistrations={()   => setActiveMenu('registration')}
-            onViewMissedLeads={()     => setActiveTab('allLeads')}
+            onViewMissedLeads={()     => setActiveMenu('missedLeads')}
             onViewAttendance={()      => setActiveTab('attendance')}
             onViewLocationVisit={()   => setActiveTab('locationVisit')}
             onViewBankLoans={()       => setActiveMenu('bankLoan')}
@@ -398,12 +415,13 @@ function AppInner() {
         onClose={() => setSidebarOpen(false)}
         activeItem={activeMenu}
         onSelectItem={handleMenuSelect}
+        onLogout={handleLogout}
       />
 
       <QuickActionsModal
         visible={quickActionsOpen}
         onClose={() => setQuickActionsOpen(false)}
-        onActionPress={(id: string) => console.log('Quick action:', id)}
+        onActionPress={handleQuickActionPress}
       />
 
       <ProfileDropdown

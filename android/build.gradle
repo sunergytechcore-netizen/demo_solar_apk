@@ -22,3 +22,24 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+subprojects { subproject ->
+    def isWindows = org.gradle.internal.os.OperatingSystem.current().isWindows()
+    def isNodeModulesLibrary = subproject.projectDir.absolutePath.contains("${File.separator}node_modules${File.separator}")
+
+    if (isWindows && isNodeModulesLibrary) {
+        subproject.tasks.configureEach { task ->
+            def snapshotsNativeOutputs =
+                task.name.startsWith("buildCMake") ||
+                task.name.startsWith("externalNativeBuild") ||
+                task.name.startsWith("prefab") ||
+                task.name.startsWith("merge") && task.name.endsWith("NativeLibs")
+
+            if (snapshotsNativeOutputs) {
+                // Gradle 9 on Windows can't snapshot the reparse-point .so files
+                // emitted by some React Native library native build tasks.
+                task.doNotTrackState("Work around unreadable native library outputs on Windows.")
+            }
+        }
+    }
+}

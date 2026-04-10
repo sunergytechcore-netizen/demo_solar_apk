@@ -8,6 +8,11 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RNLocation from 'react-native-location';
 import { useAuth } from '../contexts/AuthContext';
+import { getFreshLocation } from '../hooks/useGeo';
+import {
+  startAttendanceLocationTracking,
+  stopAttendanceLocationTracking,
+} from '../services/attendanceLocationTracker';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PRIMARY = '#4569ea';
@@ -72,6 +77,43 @@ const resolveAddr = (addr: any): string => {
   return addr.short || addr.full?.split(',')[0] || '';
 };
 
+const formatWorkHours = (record?: AttendanceRecord | null) => {
+  if (!record) return '00:00';
+
+  const formatted = record.workHoursFormatted;
+  if (typeof formatted === 'string' && /^\d{2}:\d{2}$/.test(formatted.trim())) {
+    return formatted.trim();
+  }
+
+  const numericHours =
+    typeof record.workHours === 'number' && Number.isFinite(record.workHours)
+      ? record.workHours
+      : typeof formatted === 'number' && Number.isFinite(formatted)
+        ? formatted
+        : typeof formatted === 'string'
+          ? Number.parseFloat(formatted)
+          : NaN;
+
+  if (Number.isFinite(numericHours)) {
+    const totalMinutes = Math.max(0, Math.round(numericHours * 60));
+    const hours = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+    const minutes = (totalMinutes % 60).toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  }
+
+  if (record.punchIn?.time && record.punchOut?.time) {
+    const diffMs = new Date(record.punchOut.time).getTime() - new Date(record.punchIn.time).getTime();
+    if (Number.isFinite(diffMs) && diffMs >= 0) {
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+      const minutes = (totalMinutes % 60).toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+  }
+
+  return record.punchIn?.time ? '00:00' : '—';
+};
+
 const getPeriodDates = (period: string) => {
   const now = new Date();
   if (period === 'Today') {
@@ -97,13 +139,33 @@ const openGpsSettings = () => {
   }
 };
 
+const getRecordMoment = (record: AttendanceRecord) => {
+  const candidate = record?.punchIn?.time || record?.punchOut?.time || record?.date;
+  const ts = candidate ? new Date(candidate).getTime() : 0;
+  return Number.isFinite(ts) ? ts : 0;
+};
+
+const pickLatestTodayAttendance = (records: AttendanceRecord[]) => {
+  const today = new Date().toDateString();
+  return records
+    .filter(record => new Date(record.date).toDateString() === today)
+    .sort((a, b) => getRecordMoment(b) - getRecordMoment(a))[0] || null;
+};
+
 // ─── Live Timer ───────────────────────────────────────────────────────────────
-const useLiveTimer = (running: boolean, startTs?: string) => {
+const useLiveTimer = (
+  running: boolean,
+  startTs?: string,
+  serverClockOffsetMs: number = 0,
+) => {
   const [secs, setSecs] = useState(0);
   const ref = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (running) {
-      const base = startTs ? Math.floor((Date.now() - new Date(startTs).getTime()) / 1000) : 0;
+      const adjustedNow = Date.now() - serverClockOffsetMs;
+      const base = startTs
+        ? Math.floor((adjustedNow - new Date(startTs).getTime()) / 1000)
+        : 0;
       setSecs(Math.max(0, base));
       ref.current = setInterval(() => setSecs(s => s + 1), 1000);
     } else {
@@ -111,7 +173,7 @@ const useLiveTimer = (running: boolean, startTs?: string) => {
       setSecs(0);
     }
     return () => { if (ref.current) clearInterval(ref.current); };
-  }, [running, startTs]);
+  }, [running, startTs, serverClockOffsetMs]);
   const h = Math.floor(secs / 3600).toString().padStart(2, '0');
   const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
   const s = (secs % 60).toString().padStart(2, '0');
@@ -154,7 +216,7 @@ const useGeo = () => {
 
     // Step 2: Get GPS
     try {
-      const loc = await RNLocation.getLatestLocation({ timeout: 15000 });
+      const loc = await getFreshLocation(20000);
       console.log("Loc",loc)
       // null = GPS is off (react-native-location returns null when no provider)
       if (!loc) {
@@ -232,7 +294,6 @@ const useGeo = () => {
 
 // ─── Mock ─────────────────────────────────────────────────────────────────────
 const MOCK: AttendanceRecord[] = [
-  {_id:'1',date:new Date().toISOString(),status:'present',punchIn:{time:new Date(Date.now()-3600000).toISOString(),address:'8J2P+75W, Paradeep, Odisha'},workHoursFormatted:'01:00'},
   {_id:'2',date:new Date(Date.now()-86400000).toISOString(),status:'present',punchIn:{time:'2026-03-22T09:11:00Z',address:'Kolkata'},punchOut:{time:'2026-03-22T17:30:00Z',address:'Kolkata'},workHoursFormatted:'08:19'},
   {_id:'3',date:new Date(Date.now()-172800000).toISOString(),status:'late',punchIn:{time:'2026-03-21T10:30:00Z',address:'Bhubaneswar'},punchOut:{time:'2026-03-21T18:00:00Z',address:''},workHoursFormatted:'07:30'},
   {_id:'4',date:new Date(Date.now()-259200000).toISOString(),status:'present',punchIn:{time:'2026-03-20T09:05:00Z',address:'Bhubaneswar'},punchOut:{time:'2026-03-20T18:00:00Z',address:''},workHoursFormatted:'08:55'},
@@ -241,7 +302,7 @@ const MOCK: AttendanceRecord[] = [
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearchPress, onProfilePress}) => {
-  const {fetchAPI} = useAuth();
+  const {fetchAPI, getTrackingConfig} = useAuth();
 
   const [attendances,  setAttendances]  = useState<AttendanceRecord[]>([]);
   const [calendarAtts, setCalendarAtts] = useState<AttendanceRecord[]>([]);
@@ -249,6 +310,7 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
   const [loading,      setLoading]      = useState(false);
   const [refreshing,   setRefreshing]   = useState(false);
   const [todayAtt,     setTodayAtt]     = useState<AttendanceRecord | null>(null);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
 
   const [punchLoading,       setPunchLoading]       = useState(false);
   const [punchStage,         setPunchStage]         = useState<null|'permission'|'confirm'>(null);
@@ -257,7 +319,7 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
 
   const geo = useGeo();
   const isRunning = !!todayAtt?.punchIn && !todayAtt?.punchOut;
-  const timer     = useLiveTimer(isRunning, todayAtt?.punchIn?.time);
+  const timer     = useLiveTimer(isRunning, todayAtt?.punchIn?.time, serverClockOffsetMs);
 
   const [period,       setPeriod]       = useState('This Month');
   const [statusFilter, setStatusFilter] = useState('');
@@ -267,9 +329,35 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
   const [expandedId,   setExpandedId]   = useState<string | null>(null);
 
   const [snack, setSnack] = useState<{msg:string;type:'success'|'error'|'info'}|null>(null);
+
   const showSnack = useCallback((msg: string, type: 'success'|'error'|'info' = 'success') => {
     setSnack({msg, type});
     setTimeout(() => setSnack(null), 3500);
+  }, []);
+
+  const startLocationTracking = useCallback(async (initialPoint?: {
+    lat: number;
+    lng: number;
+    accuracy?: number | null;
+    speed?: number | null;
+    time?: string;
+  }) => {
+    const trackingConfig = await getTrackingConfig();
+    await startAttendanceLocationTracking(fetchAPI, trackingConfig, {
+      requestPermissions: true,
+      initialPoint,
+    });
+  }, [fetchAPI, getTrackingConfig]);
+
+  const resumeLocationTracking = useCallback(async () => {
+    const trackingConfig = await getTrackingConfig();
+    await startAttendanceLocationTracking(fetchAPI, trackingConfig, {
+      requestPermissions: false,
+    });
+  }, [fetchAPI, getTrackingConfig]);
+
+  const stopLocationTracking = useCallback(async () => {
+    await stopAttendanceLocationTracking();
   }, []);
 
   const fetchAttendances = useCallback(async (isRefresh = false) => {
@@ -284,13 +372,17 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
       });
       const data = await fetchAPI(`/attendance?${params}`, { method: 'GET' });
       const list = data?.result?.attendances || data?.attendances || [];
+      const latestTodayAtt = pickLatestTodayAttendance(list);
       setAttendances(list);
       setSummary(data?.result?.summary || data?.summary || {});
-      const ts = new Date().toDateString();
-      setTodayAtt(list.find((a: any) => new Date(a.date).toDateString() === ts) || null);
+      setTodayAtt(latestTodayAtt);
+      if (!latestTodayAtt?.punchIn?.time || latestTodayAtt?.punchOut?.time) {
+        setServerClockOffsetMs(0);
+      }
     } catch {
       setAttendances(MOCK);
-      setTodayAtt(MOCK[0]);
+      setTodayAtt(null);
+      setServerClockOffsetMs(0);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -304,21 +396,60 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
     try {
       const data = await fetchAPI(`/attendance?startDate=${startDate}&endDate=${endDate}&limit=200`, { method: 'GET' });
       setCalendarAtts(data?.result?.attendances || data?.attendances || []);
-    } catch { setCalendarAtts(MOCK); }
+    } catch { setCalendarAtts([]); }
   }, [fetchAPI]);
 
   const doPunch = useCallback(async (mode: 'in' | 'out') => {
-    if (!geo.latitude || !geo.longitude) {
+    if (geo.latitude === null || geo.longitude === null) {
       showSnack('Location not available. Please allow GPS and retry.', 'error');
       return;
     }
     setPunchLoading(true);
     try {
+      const nowIso = new Date().toISOString();
       const body = { latitude: geo.latitude, longitude: geo.longitude, accuracy: geo.accuracy, address: geo.address };
       const data = await fetchAPI(`/attendance/${mode === 'in' ? 'punch-in' : 'punch-out'}`, { method: 'POST', body: JSON.stringify(body) });
       if (data?.success || data?.result) {
         showSnack(`Punch ${mode === 'in' ? 'In' : 'Out'} successful! ✓`);
         setPunchStage(null);
+        if (mode === 'in') {
+          const serverPunchInTime =
+            data?.result?.attendance?.punchIn?.time ||
+            data?.attendance?.punchIn?.time ||
+            nowIso;
+          const nextOffsetMs = Date.now() - new Date(serverPunchInTime).getTime();
+          setServerClockOffsetMs(Number.isFinite(nextOffsetMs) ? nextOffsetMs : 0);
+          setTodayAtt(prev => ({
+            _id: prev?._id || `local-${nowIso}`,
+            ...prev,
+            date: nowIso,
+            status: prev?.status || 'present',
+            punchIn: {
+              time: nowIso,
+              address: geo.address || prev?.punchIn?.address,
+              location: {lat: geo.latitude, lng: geo.longitude},
+            },
+            punchOut: undefined,
+          }));
+          await startLocationTracking({
+            lat: geo.latitude,
+            lng: geo.longitude,
+            accuracy: geo.accuracy,
+            time: nowIso,
+          });
+        }
+        else {
+          setServerClockOffsetMs(0);
+          setTodayAtt(prev => prev ? ({
+            ...prev,
+            punchOut: {
+              time: nowIso,
+              address: geo.address || prev?.punchOut?.address,
+              location: {lat: geo.latitude, lng: geo.longitude},
+            },
+          }) : prev);
+          await stopLocationTracking();
+        }
         geo.reset();
         await fetchAttendances();
         await fetchCalendarMonth(currentMonth);
@@ -330,13 +461,18 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
     } finally {
       setPunchLoading(false);
     }
-  }, [geo, fetchAPI, fetchAttendances, fetchCalendarMonth, currentMonth, showSnack]);
+  }, [geo, fetchAPI, fetchAttendances, fetchCalendarMonth, currentMonth, showSnack, startLocationTracking, stopLocationTracking]);
 
   useEffect(() => { fetchAttendances(); }, [period, statusFilter]);
   useEffect(() => { fetchCalendarMonth(currentMonth); }, [currentMonth]);
 
   const hasPunchedIn  = !!todayAtt?.punchIn;
   const hasPunchedOut = !!todayAtt?.punchOut;
+
+  useEffect(() => {
+    if (hasPunchedIn && !hasPunchedOut) resumeLocationTracking();
+    if (hasPunchedOut) stopLocationTracking();
+  }, [hasPunchedIn, hasPunchedOut, resumeLocationTracking, stopLocationTracking]);
 
   const openPunch = (mode: 'in'|'out') => {
     if (mode === 'in'  && hasPunchedIn)  { showSnack(hasPunchedOut ? 'Day complete!' : 'Already punched in.', 'info'); return; }
@@ -489,7 +625,7 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
             {[
               {lbl:'Punch In', val: todayAtt?.punchIn ? fmtTime(todayAtt.punchIn.time) : '--:--'},
               null,
-              {lbl:'Work Hours', val: todayAtt?.workHoursFormatted || '00:00'},
+              {lbl:'Work Hours', val: formatWorkHours(todayAtt)},
               null,
               {lbl:'Status', val: hasPunchedIn ? 'Present' : 'Absent', green: hasPunchedIn},
             ].map((item, i) =>
@@ -630,7 +766,7 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
                 <View style={s.punchRow}>
                   <View style={s.punchItem}><Text style={s.punchLbl}>Punch In</Text><Text style={s.punchGreen}>{fmtTime(log.punchIn?.time)}</Text></View>
                   <View style={s.punchItem}><Text style={s.punchLbl}>Punch Out</Text><Text style={s.punchBlue}>{log.punchOut ? fmtTime(log.punchOut.time) : log.punchIn ? 'Ongoing' : '—'}</Text></View>
-                  <View style={s.punchItem}><Text style={s.punchLbl}>Hours</Text><Text style={s.punchBlue}>{log.workHoursFormatted || '—'}</Text></View>
+                  <View style={s.punchItem}><Text style={s.punchLbl}>Hours</Text><Text style={s.punchBlue}>{formatWorkHours(log)}</Text></View>
                 </View>
                 {resolveAddr(log.punchIn?.address) !== '' && (
                   <View style={s.locRow}>
@@ -794,9 +930,9 @@ const AttendanceScreen: React.FC<AttendanceScreenProps> = ({onMenuPress, onSearc
                 <Text style={s.punchCancelTxt}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.punchConfirmBtn, {backgroundColor: punchMode==='in' ? SUCCESS : DANGER}, (punchLoading || geo.loading || !geo.latitude) && s.punchConfirmDisabled]}
+                style={[s.punchConfirmBtn, {backgroundColor: punchMode==='in' ? SUCCESS : DANGER}, (punchLoading || geo.loading || geo.latitude === null || geo.longitude === null) && s.punchConfirmDisabled]}
                 onPress={() => doPunch(punchMode)}
-                disabled={punchLoading || geo.loading || !geo.latitude}
+                disabled={punchLoading || geo.loading || geo.latitude === null || geo.longitude === null}
                 activeOpacity={0.85}>
                 {punchLoading
                   ? <ActivityIndicator size="small" color="#fff" />

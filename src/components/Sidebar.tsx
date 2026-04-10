@@ -7,6 +7,7 @@ import {
   ScrollView,
   Animated,
   Dimensions,
+  Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -21,6 +22,7 @@ interface SidebarProps {
   onClose: () => void;
   activeItem: string;
   onSelectItem: (id: string) => void;
+  onLogout?: () => void | Promise<void>;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -28,6 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onClose,
   activeItem,
   onSelectItem,
+  onLogout,
 }) => {
   const translateX     = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -47,71 +50,85 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [visible]);
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={visible ? 'auto' : 'none'}>
-      {/* Overlay */}
-      <TouchableWithoutFeedback onPress={onClose}>
-        <Animated.View style={[styles.overlay, {opacity: overlayOpacity}]} />
-      </TouchableWithoutFeedback>
+    <Modal
+      transparent
+      visible={visible}
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent>
+      <View style={StyleSheet.absoluteFill}>
+        {/* Overlay */}
+        <TouchableWithoutFeedback onPress={onClose}>
+          <Animated.View style={[styles.overlay, {opacity: overlayOpacity}]} />
+        </TouchableWithoutFeedback>
 
-      {/* Drawer */}
-      <Animated.View style={[styles.drawer, {transform: [{translateX}]}]}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.logoRow}>
-            <View style={styles.logo}>
-              <MaterialCommunityIcons name="solar-power" size={22} color="#fff" />
+        {/* Drawer */}
+        <Animated.View style={[styles.drawer, {transform: [{translateX}]}]}>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.logoRow}>
+              <View style={styles.logo}>
+                <MaterialCommunityIcons name="solar-power" size={22} color="#fff" />
+              </View>
+              <View style={{marginLeft: 12}}>
+                <Text style={styles.title}>SunergyTech</Text>
+                <Text style={styles.subtitle}>Solar Management</Text>
+              </View>
             </View>
-            <View style={{marginLeft: 12}}>
-              <Text style={styles.title}>SunergyTech</Text>
-              <Text style={styles.subtitle}>Solar Management</Text>
+            <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+              <MaterialCommunityIcons name="close" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Menu Items */}
+          <ScrollView style={styles.menu} showsVerticalScrollIndicator={false}>
+            {MENU_ITEMS.map(item => {
+              const isActive = activeItem === item.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.menuItem, isActive && styles.menuItemActive]}
+                  onPress={() => { onSelectItem(item.id); onClose(); }}
+                  activeOpacity={0.75}>
+                  <View style={styles.menuItemInner}>
+                    <VIcon
+                      lib={item.lib}
+                      name={item.icon}
+                      size={20}
+                      color={isActive ? '#fff' : 'rgba(255,255,255,0.75)'}
+                    />
+                    <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
+                      {item.label}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <View style={styles.footerAvatar}>
+              <Text style={styles.footerAvatarText}>ST</Text>
             </View>
+            <View style={{flex: 1, marginLeft: 10}}>
+              <Text style={styles.footerName}>Sunergy tech</Text>
+              <Text style={styles.footerVersion}>v2.2.0</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              activeOpacity={0.8}
+              hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}
+              onPress={async () => {
+                onClose();
+                await onLogout?.();
+              }}>
+              <MaterialCommunityIcons name="logout" size={18} color="#fff" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <MaterialCommunityIcons name="close" size={16} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Menu Items */}
-        <ScrollView style={styles.menu} showsVerticalScrollIndicator={false}>
-          {MENU_ITEMS.map(item => {
-            const isActive = activeItem === item.id;
-            return (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.menuItem, isActive && styles.menuItemActive]}
-                onPress={() => { onSelectItem(item.id); onClose(); }}
-                activeOpacity={0.75}>
-                <View style={styles.menuItemInner}>
-                  <VIcon
-                    lib={item.lib}
-                    name={item.icon}
-                    size={20}
-                    color={isActive ? '#fff' : 'rgba(255,255,255,0.75)'}
-                  />
-                  <Text style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
-                    {item.label}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <View style={styles.footerAvatar}>
-            <Text style={styles.footerAvatarText}>ST</Text>
-          </View>
-          <View style={{flex: 1, marginLeft: 10}}>
-            <Text style={styles.footerName}>Sunergy tech</Text>
-            <Text style={styles.footerVersion}>v2.2.0</Text>
-          </View>
-          <TouchableOpacity style={styles.logoutBtn}>
-            <MaterialCommunityIcons name="logout" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-    </View>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 };
 
