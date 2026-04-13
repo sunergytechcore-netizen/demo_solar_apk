@@ -37,7 +37,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/MaterialIcons";
-import DocumentPicker from '@react-native-documents/picker';
+import {
+  errorCodes as documentPickerErrorCodes,
+  isErrorWithCode as isDocumentPickerError,
+  pick as pickDocument,
+  types as documentPickerTypes,
+} from '@react-native-documents/picker';
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -152,6 +157,10 @@ const formatFileSize = (bytes: number): string => {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
+
+const isDocumentPickerCancel = (error: unknown) =>
+  isDocumentPickerError(error) &&
+  error.code === documentPickerErrorCodes.OPERATION_CANCELED;
 
 const formatDate = (dateString: string, short = false): string => {
   if (!dateString) return "Not set";
@@ -311,12 +320,12 @@ const FileUploadField = ({
   const hasFile = value?.preview || value?.url;
   const handlePick = async () => {
     try {
-      const res = await DocumentPicker.pick({
-        type: [DocumentPicker.types.images, DocumentPicker.types.pdf],
+      const res = await pickDocument({
+        type: [documentPickerTypes.images, documentPickerTypes.pdf],
       });
       onFileChange(field, res[0]);
     } catch (e) {
-      if (!DocumentPicker.isCancel(e)) console.warn("File pick error", e);
+      if (!isDocumentPickerCancel(e)) console.warn("File pick error", e);
     }
   };
   return (
@@ -738,8 +747,12 @@ const ViewLeadModal = ({
     { title: "PAN Card",            url: lead.panCard?.url,         iconName: "credit-card"     },
     { title: "Bank Passbook",       url: lead.passbook?.url,        iconName: "receipt-long"    },
     { title: "Registration Doc",    url: lead.uploadDocument?.url,  iconName: "description"     },
+    { title: "Installation Doc",    url: lead.installationDocument?.url, iconName: "construction" },
     ...(lead.otherDocuments?.map((d: any, i: number) => ({
       title: d.name || `Other Doc ${i + 1}`, url: d.url, iconName: "insert-drive-file",
+    })) || []),
+    ...(lead.enhancementDocuments?.map((d: any, i: number) => ({
+      title: d.name || `Enhancement Doc ${i + 1}`, url: d.url, iconName: "bolt",
     })) || []),
   ].filter(d => d.url);
 
@@ -759,8 +772,12 @@ const ViewLeadModal = ({
         </View>
 
         {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ borderBottomWidth: 1, borderBottomColor: "#e5e7eb" }}>
+        <View style={vm.tabBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={vm.tabBarContent}
+          >
           {TABS.map((t, i) => (
             <TouchableOpacity
               key={i} style={[vm.tab, tab === i && vm.tabActive]}
@@ -770,9 +787,10 @@ const ViewLeadModal = ({
               <Text style={[vm.tabTxt, tab === i && vm.tabTxtActive]}>{t.label}</Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+          </ScrollView>
+        </View>
 
-        <ScrollView style={{ flex: 1, padding: 14 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={vm.content}>
           {/* Basic Info */}
           {tab === 0 && (
             <>
@@ -952,10 +970,15 @@ const EditLeadModal = ({
 
   const handleAddOtherDoc = async () => {
     try {
-      const res = await DocumentPicker.pick({
-        type: [DocumentPicker.types.images, DocumentPicker.types.pdf],
+      const res = await pickDocument({
+        type: [documentPickerTypes.images, documentPickerTypes.pdf],
       });
       const file = res[0];
+      if (!file) return;
+      if (file.size && file.size > MAX_FILE_SIZE) {
+        showToast("File must be under 5 MB", "error");
+        return;
+      }
       setForm((p: any) => ({
         ...p,
         otherDocuments: [
@@ -964,7 +987,7 @@ const EditLeadModal = ({
         ],
       }));
     } catch (e) {
-      if (!DocumentPicker.isCancel(e)) showToast("Failed to pick file", "error");
+      if (!isDocumentPickerCancel(e)) showToast("Failed to pick file", "error");
     }
   };
 
@@ -1940,13 +1963,16 @@ const fs = StyleSheet.create({
 });
 
 const vm = StyleSheet.create({
-  header: { backgroundColor: PRIMARY_COLOR, flexDirection: "row", alignItems: "center", padding: 16 },
+  header: { backgroundColor: PRIMARY_COLOR, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
   name:   { fontSize: 16, fontWeight: "700", color: "#fff" },
   sub:    { fontSize: 11, color: "rgba(255,255,255,0.85)", marginTop: 2 },
+  tabBar: { backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
+  tabBarContent: { paddingHorizontal: 6, alignItems: "center" },
   tab:    { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 5 },
   tabActive: { borderBottomWidth: 2, borderBottomColor: PRIMARY_COLOR },
   tabTxt:    { fontSize: 12, color: "#9ca3af", fontWeight: "500" },
   tabTxtActive: { color: PRIMARY_COLOR, fontWeight: "700" },
+  content: { padding: 14, paddingTop: 12, paddingBottom: 24 },
   card:   { backgroundColor: "#fff", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: rgba(PRIMARY_COLOR, 0.1) },
   cardTitle: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   cardTitleTxt: { fontSize: 14, fontWeight: "700", color: PRIMARY_COLOR },

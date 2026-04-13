@@ -322,7 +322,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
     if (!imageData)                    errors.photo        = 'Please capture a photo';
     if (!formData.locationName.trim()) errors.locationName = 'Location name is required';
     if (latitude === null || longitude === null) errors.location = 'Location coordinates are required';
-    if (isLeadCreated === 'yes') {
+    if (isLeadCreated === 'yes' || isLeadCreated === 'no') {
       if (!formData.contactPerson.trim()) errors.contactPerson = 'Contact person is required';
       if (formData.phone && !/^[0-9+\-\s()]{10,15}$/.test(formData.phone)) errors.phone = 'Enter a valid phone number';
       if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = 'Enter a valid email';
@@ -350,22 +350,21 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
       fd.append('photos', { uri:imageData!.uri, type:imageData!.type, name:imageData!.name } as any);
 
       const visitJson = await fetchAPI('/visit', { method:'POST', body:fd });
+      const visitResult = visitJson?.result ?? visitJson?.data ?? visitJson;
+      const visitData = visitResult?.visit ?? visitResult;
+      const createdLead = visitResult?.lead ?? null;
 
-      const nameSource = formData.contactPerson.trim() || formData.locationName.trim() || 'Unknown';
-      const parts = nameSource.split(' ');
-      const leadPayload: any = {
-        firstName: parts[0]||'Unknown', lastName: parts.slice(1).join(' ')||'Visit',
-        visitLocation: formData.locationName.trim(), visitNotes: formData.remarks.trim(),
-        visitStatus:'Completed', status:'Visit',
-      };
-      if (formData.phone.trim()) leadPayload.phone = formData.phone.trim();
-      if (formData.email.trim()) leadPayload.email = formData.email.trim();
-      try { await fetchAPI('/lead/create', { method:'POST', body:JSON.stringify(leadPayload) }); }
-      catch { console.warn('Lead save failed (non-critical)'); }
+      if (!visitData?._id) {
+        throw new Error(visitJson?.message || visitResult?.message || 'Visit was created, but the app could not read the response');
+      }
 
-      const visitData = visitJson.data || visitJson;
+      if ((isLeadCreated === 'yes' || isLeadCreated === 'no') && !createdLead?._id) {
+        throw new Error('Visit was saved, but lead was not created. Please check backend lead creation.');
+      }
+
       setCreatedVisit(visitData);
       setSuccess(true);
+      showSnack('Visit created successfully', 'success');
       if (onSave) onSave(visitData);
       setImageData(null); setPreview(null);
       setFormData({ locationName:'', remarks:'', contactPerson:'', phone:'', email:'' });
@@ -379,7 +378,15 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
 
   // latitude/longitude come from useGeo; both must be non-null to enable submit
   const hasCoords = latitude !== null && longitude !== null;
-  const canSubmit  = !loading && hasCoords && !!imageData && !!formData.locationName.trim();
+  const requiresContact = isLeadCreated === 'yes' || isLeadCreated === 'no';
+  const requiresRemarks = isLeadCreated === 'other';
+  const canSubmit  =
+    !loading &&
+    hasCoords &&
+    !!imageData &&
+    !!formData.locationName.trim() &&
+    (!requiresContact || !!formData.contactPerson.trim()) &&
+    (!requiresRemarks || !!formData.remarks.trim());
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -561,7 +568,13 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
                 <TouchableOpacity
                   key={opt}
                   style={[s.radioOpt, isLeadCreated===opt && s.radioOptActive]}
-                  onPress={() => { setIsLeadCreated(opt); setSuggestions([]); setShowSuggestions(false); }}
+                  onPress={() => {
+                    setIsLeadCreated(opt);
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                    setValidationErrors({});
+                    setSubmitError(null);
+                  }}
                   activeOpacity={0.8}
                 >
                   <View style={[s.radioCircle, isLeadCreated===opt && s.radioCircleActive]}>
@@ -579,11 +592,11 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
           {(isLeadCreated==='yes' || isLeadCreated==='no') && (
             <SectionCard>
               <SectionTitle icon="account" label="Contact Information"
-                badge={isLeadCreated==='yes' ? 'Lead Created' : 'No Lead'}
-                badgeColor={isLeadCreated==='yes' ? 'success' : 'warning'} />
+                badge={isLeadCreated==='other' ? 'Visit Only' : 'Lead Created'}
+                badgeColor="success" />
               <View style={{ position:'relative' }}>
                 <View style={s.inputWrap}>
-                  <Text style={s.inputLabel}>{isLeadCreated==='yes' ? 'Contact Person *' : 'Contact Person'}</Text>
+                  <Text style={s.inputLabel}>Contact Person *</Text>
                   <View style={[s.inputRow, validationErrors.contactPerson && s.inputRowError]}>
                     <MaterialCommunityIcons name="account" size={18} color={rgba(PRIMARY,0.5)} style={{ marginRight:8 }} />
                     <TextInput

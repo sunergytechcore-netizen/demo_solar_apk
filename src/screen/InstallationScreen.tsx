@@ -484,10 +484,24 @@ const ViewLeadModal = ({visible,onClose,lead,onViewDocument}) => {
   if (!lead) return null;
   const cfg   = getStatusCfg(lead.installationStatus);
   const ldCfg = getLeadCfg(lead.status);
+  const docs = [
+    { title: 'Registration Doc', url: lead.uploadDocument?.url, icon: 'document-text-outline' },
+    { title: 'Aadhaar Card', url: lead.aadhaar?.url, icon: 'card-outline' },
+    { title: 'PAN Card', url: lead.panCard?.url, icon: 'card-outline' },
+    { title: 'Bank Passbook', url: lead.passbook?.url, icon: 'receipt-outline' },
+    { title: 'Installation Doc', url: lead.installationDocument?.url, icon: 'document-attach-outline' },
+    ...(lead.otherDocuments?.map((d:any, i:number) => ({
+      title: d.name || `Other Doc ${i + 1}`, url: d.url, icon: 'document-outline',
+    })) || []),
+    ...(lead.enhancementDocuments?.map((d:any, i:number) => ({
+      title: d.name || `Enhancement Doc ${i + 1}`, url: d.url, icon: 'flash-outline',
+    })) || []),
+  ].filter((d:any) => d.url);
 
   const TABS = [
     {label:'Installation', icon:'build-outline'  },
     {label:'Customer',     icon:'person-outline' },
+    {label:'Documents',    icon:'folder-open-outline' },
   ];
 
   return (
@@ -571,6 +585,30 @@ const ViewLeadModal = ({visible,onClose,lead,onViewDocument}) => {
               <InfoRow label="Address"   value={lead.address}/>
               <InfoRow label="City"      value={lead.city}/>
               <InfoRow label="State"     value={lead.state}/>
+            </View>
+          )}
+
+          {tab===2 && (
+            <View style={st.detCard}>
+              <View style={st.detTitleRow}>
+                <IIcon name="folder-open" size={15} color={C.primary}/>
+                <Text style={[st.detTitle,{marginLeft:6}]}>All Documents</Text>
+              </View>
+              {docs.length > 0 ? docs.map((doc:any, i:number) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[st.docBtn,{justifyContent:'space-between', marginTop:i===0?8:10}]}
+                  onPress={()=>onViewDocument?.(doc.url)}
+                >
+                  <View style={{flexDirection:'row', alignItems:'center', flex:1}}>
+                    <IIcon name={doc.icon} size={15} color={C.primary}/>
+                    <Text style={[st.docBtnTxt,{marginLeft:8, flex:1}]} numberOfLines={1}>{doc.title}</Text>
+                  </View>
+                  <Text style={st.docBtnTxt}>View</Text>
+                </TouchableOpacity>
+              )) : (
+                <Text style={{color:C.textSec, fontSize:14}}>No documents uploaded</Text>
+              )}
             </View>
           )}
         </ScrollView>

@@ -21,8 +21,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  SafeAreaView,
+  Image,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import {
+  errorCodes as documentPickerErrorCodes,
+  isErrorWithCode as isDocumentPickerError,
+  pick as pickDocument,
+  types as documentPickerTypes,
+} from '@react-native-documents/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../contexts/AuthContext';
 
 const PRIMARY   = '#4569ea';
@@ -45,6 +54,15 @@ const rgba = (hex: string, opacity: number) => {
 
 const ALLOWED_ROLES     = ['Head_office', 'ZSM', 'ASM', 'TEAM'];
 const DEFAULT_PAGE_SIZE = 10;
+const MAX_UPLOAD_FILE_SIZE = 10 * 1024 * 1024;
+
+const REGISTRATION_UPLOAD_TYPE_OPTIONS = [
+  { value: 'registrationDocument', label: 'Registration Document', icon: 'file-document-outline' },
+  { value: 'aadhaar', label: 'Aadhaar Card', icon: 'card-account-details-outline' },
+  { value: 'panCard', label: 'PAN Card', icon: 'card-bulleted-outline' },
+  { value: 'passbook', label: 'Bank Passbook', icon: 'bank-outline' },
+  { value: 'otherDocuments', label: 'Other Document', icon: 'file-outline' },
+];
 
 const REGISTRATION_STATUS_OPTIONS = ['pending', 'completed', 'inProgress'];
 const REGISTRATION_STATUS_CONFIG: Record<string, any> = {
@@ -110,6 +128,139 @@ const validatePincode = (v: string) => {
   if (!v.trim()) return 'Pincode is required';
   if (!/^\d{6}$/.test(v.trim())) return 'Pincode must be 6 digits';
   return '';
+};
+
+const formatFileSize = (bytes: number): string => {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+};
+
+const isDocumentPickerCancel = (error: unknown) =>
+  isDocumentPickerError(error) &&
+  error.code === documentPickerErrorCodes.OPERATION_CANCELED;
+
+const LinearProgress = ({ value = 0 }: { value: number }) => (
+  <View style={styles.regProgressTrack}>
+    <View style={[styles.regProgressFill, { width: `${Math.min(value, 100)}%` }]} />
+  </View>
+);
+
+const RegistrationSelect = ({
+  value,
+  options,
+  onChange,
+  placeholder = 'Select...',
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  const selected = options.find(opt => opt.value === value);
+
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.regSelectTrigger}
+        onPress={() => setOpen(true)}
+        activeOpacity={0.8}
+      >
+        <Text style={[styles.regSelectTriggerText, !selected && styles.regPlaceholderText]}>
+          {selected ? selected.label : placeholder}
+        </Text>
+        <MaterialCommunityIcons name="chevron-down" size={20} color="#6b7280" />
+      </TouchableOpacity>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.regSelectOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.regSelectPanel}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {options.map(opt => (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.regSelectOption, value === opt.value && styles.regSelectOptionActive]}
+                  onPress={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={[styles.regSelectOptionText, value === opt.value && styles.regSelectOptionTextActive]}>
+                    {opt.label}
+                  </Text>
+                  {value === opt.value && (
+                    <MaterialCommunityIcons name="check" size={16} color={PRIMARY} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+};
+
+const RegistrationFileUploadField = ({
+  label,
+  field,
+  value,
+  onFileChange,
+  onRemove,
+  validationErrors,
+}: any) => {
+  const hasFile = value?.preview || value?.url;
+
+  const handlePick = async () => {
+    try {
+      const res = await pickDocument({
+        type: [documentPickerTypes.images, documentPickerTypes.pdf],
+      });
+      onFileChange(field, res[0]);
+    } catch (e) {
+      if (!isDocumentPickerCancel(e)) console.warn('File pick error', e);
+    }
+  };
+
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <Text style={styles.regUploadFieldLabel}>{label}</Text>
+      {hasFile ? (
+        <View style={[styles.regUploadFileBox, validationErrors?.[field] && styles.regUploadErrorBorder]}>
+          {value.preview
+            ? <Image source={{ uri: value.preview }} style={styles.regUploadThumb} />
+            : <MaterialCommunityIcons name="file-document-outline" size={34} color={PRIMARY} />}
+          <View style={{ flex: 1, marginHorizontal: 10 }}>
+            <Text style={styles.regUploadFileName} numberOfLines={1}>
+              {value.file?.name || value.url?.split('/').pop() || label}
+            </Text>
+            <Text style={styles.regUploadFileMeta}>
+              {value.file?.size ? formatFileSize(value.file.size) : 'Existing document'}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => onRemove(field)}>
+            <MaterialCommunityIcons name="delete-outline" size={20} color={ERROR} />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[styles.regUploadDrop, validationErrors?.[field] && styles.regUploadErrorBorder]}
+          onPress={handlePick}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons name="cloud-upload-outline" size={36} color="#d1d5db" />
+          <Text style={styles.regUploadDropText}>Tap to upload {label}</Text>
+          <Text style={styles.regUploadDropHint}>JPG, PNG or PDF - max 10 MB</Text>
+        </TouchableOpacity>
+      )}
+      {validationErrors?.[field] ? (
+        <Text style={styles.regUploadErrorText}>{validationErrors[field]}</Text>
+      ) : null}
+    </View>
+  );
 };
 
 // ─── Avatar ───────────────────────────────────────────────────
@@ -352,6 +503,362 @@ const RegistrationCard = ({ item, onView, onEdit, onUpload, permissions }: any) 
   );
 };
 
+const RegistrationUploadModal = ({
+  visible,
+  onClose,
+  registration,
+  onUploaded,
+  showToast,
+}: any) => {
+  const { fetchAPI } = useAuth();
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [errors, setErrors] = useState<any>({});
+  const [form, setForm] = useState<any>({
+    documentStatus: 'pending',
+    registrationDocument: { file: null, url: '', preview: null },
+    aadhaar: { file: null, url: '', preview: null },
+    panCard: { file: null, url: '', preview: null },
+    passbook: { file: null, url: '', preview: null },
+    otherDocuments: [],
+    documentSubmissionDate: null,
+    documentNotes: '',
+  });
+
+  useEffect(() => {
+    if (visible) {
+      setUploading(false);
+      setProgress(0);
+      setErrors({});
+      setShowDatePicker(false);
+      setForm({
+        documentStatus: registration?.documentStatus || 'pending',
+        registrationDocument: {
+          file: null,
+          url: registration?.uploadDocument?.url || '',
+          preview: null,
+        },
+        aadhaar: {
+          file: null,
+          url: registration?.aadhaar?.url || '',
+          preview: registration?.aadhaar?.url || null,
+        },
+        panCard: {
+          file: null,
+          url: registration?.panCard?.url || '',
+          preview: registration?.panCard?.url || null,
+        },
+        passbook: {
+          file: null,
+          url: registration?.passbook?.url || '',
+          preview: registration?.passbook?.url || null,
+        },
+        otherDocuments: registration?.otherDocuments || [],
+        documentSubmissionDate: registration?.documentSubmissionDate ? new Date(registration.documentSubmissionDate) : null,
+        documentNotes: registration?.documentNotes || '',
+      });
+    }
+  }, [visible, registration?._id]);
+
+  const handleFileChange = useCallback((field: string, file: any) => {
+    if (file.size && file.size > MAX_UPLOAD_FILE_SIZE) {
+      showToast('File must be under 10 MB', 'error');
+      return;
+    }
+    const isImg = file.type?.startsWith('image/');
+    setForm((prev: any) => ({
+      ...prev,
+      [field]: { file, url: file.uri, preview: isImg ? file.uri : null },
+    }));
+    setErrors((prev: any) => ({ ...prev, [field]: '' }));
+  }, [showToast]);
+
+  const handleRemove = useCallback((field: string) => {
+    setForm((prev: any) => ({
+      ...prev,
+      [field]: { file: null, url: '', preview: null },
+    }));
+  }, []);
+
+  const handleAddOtherDoc = useCallback(async () => {
+    try {
+      const res = await pickDocument({
+        type: [documentPickerTypes.images, documentPickerTypes.pdf],
+      });
+      const file = res[0];
+      if (!file) return;
+      if (file.size && file.size > MAX_UPLOAD_FILE_SIZE) {
+        showToast('File must be under 10 MB', 'error');
+        return;
+      }
+      setForm((prev: any) => ({
+        ...prev,
+        otherDocuments: [
+          ...prev.otherDocuments,
+          {
+            file,
+            name: file.name,
+            url: file.uri,
+            preview: file.type?.startsWith('image/') ? file.uri : null,
+          },
+        ],
+      }));
+    } catch (e) {
+      if (!isDocumentPickerCancel(e)) showToast('Failed to pick file', 'error');
+    }
+  }, [showToast]);
+
+  const handleUpload = useCallback(async () => {
+    if (!registration?._id) return;
+    if (!form.documentStatus) {
+      setErrors({ documentStatus: 'Document status is required' });
+      return;
+    }
+
+    const hasGeneralFiles =
+      !!form.aadhaar.file ||
+      !!form.panCard.file ||
+      !!form.passbook.file ||
+      form.otherDocuments.some((d: any) => !!d.file);
+    const hasRegistrationFile = !!form.registrationDocument.file;
+
+    if (!hasGeneralFiles && !hasRegistrationFile) {
+      showToast('Please select at least one document to upload', 'error');
+      return;
+    }
+
+    setUploading(true);
+    setProgress(0);
+    try {
+      let latestResult: any = registration;
+      const interval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(interval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 400);
+
+      if (hasRegistrationFile) {
+        const regFd = new FormData();
+        regFd.append('document', {
+          uri: form.registrationDocument.file.uri,
+          type: form.registrationDocument.file.type || 'application/octet-stream',
+          name: form.registrationDocument.file.name || `registration_${Date.now()}`,
+        } as any);
+
+        const regRes = await fetchAPI(`/lead/registration/${registration._id}/document-upload`, {
+          method: 'POST',
+          body: regFd,
+        });
+
+        if (!regRes?.success) {
+          throw new Error(regRes?.message || 'Registration document upload failed');
+        }
+        latestResult = regRes.result || latestResult;
+      }
+
+      if (hasGeneralFiles || form.documentNotes || form.documentSubmissionDate || form.documentStatus) {
+        const fd = new FormData();
+        const jsonData: any = {};
+        if (form.documentNotes) jsonData.documentNotes = form.documentNotes;
+        if (form.documentStatus) jsonData.documentStatus = form.documentStatus;
+        if (form.documentSubmissionDate) {
+          jsonData.documentSubmissionDate = new Date(form.documentSubmissionDate)
+            .toISOString()
+            .split('T')[0];
+        }
+
+        const appendFile = (key: string, f: any) =>
+          fd.append(key, { uri: f.uri, type: f.type || 'application/octet-stream', name: f.name } as any);
+
+        if (form.aadhaar.file) appendFile('aadhaar', form.aadhaar.file);
+        if (form.panCard.file) appendFile('panCard', form.panCard.file);
+        if (form.passbook.file) appendFile('passbook', form.passbook.file);
+        form.otherDocuments.forEach((d: any) => { if (d.file) appendFile('otherDocuments', d.file); });
+        fd.append('data', JSON.stringify(jsonData));
+
+        const docsRes = await fetchAPI(`/lead/upload/${registration._id}/upload-documents`, {
+          method: 'PUT',
+          body: fd,
+        });
+
+        if (!docsRes?.success) {
+          throw new Error(docsRes?.message || 'Document upload failed');
+        }
+        latestResult = docsRes.result || latestResult;
+      }
+
+      setProgress(100);
+      showToast('Document uploaded successfully', 'success');
+      onUploaded?.(latestResult);
+      setTimeout(() => onClose(), 500);
+    } catch (e: any) {
+      showToast(e.message || 'Upload failed', 'error');
+    } finally {
+      setProgress(0);
+      setUploading(false);
+    }
+  }, [fetchAPI, form, onClose, onUploaded, registration, showToast]);
+
+  if (!registration) return null;
+
+  const statusOptions = [
+    { value: 'pending', label: 'Pending' },
+    { value: 'submitted', label: 'Submitted' },
+    { value: 'rejected', label: 'Rejected' },
+  ];
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <View style={styles.regUploadHeaderBar}>
+            <View style={styles.regUploadHeaderIconWrap}>
+              <MaterialCommunityIcons name="cloud-upload-outline" size={22} color={PRIMARY} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.regUploadHeaderTitle}>Upload Documents</Text>
+              <Text style={styles.regUploadHeaderSub}>{registration.firstName} {registration.lastName}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} disabled={uploading}>
+              <MaterialCommunityIcons name="close" size={24} color="#374151" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+            {uploading && progress > 0 && (
+              <View style={{ marginBottom: 14 }}>
+                <Text style={styles.regUploadProgressText}>Uploading... {progress}%</Text>
+                <LinearProgress value={progress} />
+              </View>
+            )}
+
+            <Text style={styles.regUploadFieldLabel}>Document Status *</Text>
+            <RegistrationSelect
+              value={form.documentStatus}
+              options={statusOptions}
+              onChange={v => setForm((prev: any) => ({ ...prev, documentStatus: v }))}
+            />
+            {errors.documentStatus ? <Text style={styles.regUploadErrorText}>{errors.documentStatus}</Text> : null}
+
+            <Text style={[styles.regUploadFieldLabel, { marginTop: 14 }]}>Submission Date</Text>
+            <TouchableOpacity style={styles.regUploadDateRow} onPress={() => setShowDatePicker(true)}>
+              <MaterialCommunityIcons name="calendar-month-outline" size={16} color="#6b7280" />
+              <Text style={[styles.regUploadDateText, !form.documentSubmissionDate && styles.regPlaceholderText]}>
+                {form.documentSubmissionDate
+                  ? new Date(form.documentSubmissionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                  : 'Select date'}
+              </Text>
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={form.documentSubmissionDate || new Date()}
+                mode="date"
+                display="default"
+                onChange={(_, d) => {
+                  setShowDatePicker(false);
+                  if (d) setForm((prev: any) => ({ ...prev, documentSubmissionDate: d }));
+                }}
+              />
+            )}
+
+            <Text style={[styles.regUploadSectionTitle, { marginTop: 16 }]}>Required Documents</Text>
+            <RegistrationFileUploadField
+              label="Registration Document"
+              field="registrationDocument"
+              value={form.registrationDocument}
+              onFileChange={handleFileChange}
+              onRemove={handleRemove}
+              validationErrors={errors}
+            />
+            <RegistrationFileUploadField
+              label="Aadhaar Card"
+              field="aadhaar"
+              value={form.aadhaar}
+              onFileChange={handleFileChange}
+              onRemove={handleRemove}
+              validationErrors={errors}
+            />
+            <RegistrationFileUploadField
+              label="PAN Card"
+              field="panCard"
+              value={form.panCard}
+              onFileChange={handleFileChange}
+              onRemove={handleRemove}
+              validationErrors={errors}
+            />
+            <RegistrationFileUploadField
+              label="Passbook"
+              field="passbook"
+              value={form.passbook}
+              onFileChange={handleFileChange}
+              onRemove={handleRemove}
+              validationErrors={errors}
+            />
+
+            <Text style={[styles.regUploadSectionTitle, { marginTop: 4 }]}>
+              Other Documents ({form.otherDocuments.length})
+            </Text>
+            {form.otherDocuments.map((doc: any, i: number) => (
+              <View key={i} style={styles.regOtherDocItem}>
+                <MaterialCommunityIcons name="file-document-outline" size={26} color={PRIMARY} />
+                <Text style={styles.regOtherDocName} numberOfLines={1}>{doc.name}</Text>
+                <TouchableOpacity
+                  onPress={() => setForm((prev: any) => ({
+                    ...prev,
+                    otherDocuments: prev.otherDocuments.filter((_: any, j: number) => j !== i),
+                  }))}
+                >
+                  <MaterialCommunityIcons name="delete-outline" size={20} color={ERROR} />
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.regAddMoreBtn} onPress={handleAddOtherDoc} disabled={uploading}>
+              <MaterialCommunityIcons name="plus-circle-outline" size={18} color={PRIMARY} />
+              <Text style={styles.regAddMoreText}>Add More Documents</Text>
+            </TouchableOpacity>
+
+            <Text style={[styles.regUploadFieldLabel, { marginTop: 16 }]}>Document Notes</Text>
+            <TextInput
+              style={styles.regUploadNotesInput}
+              value={form.documentNotes}
+              onChangeText={t => setForm((prev: any) => ({ ...prev, documentNotes: t }))}
+              multiline
+              numberOfLines={4}
+              placeholder="Add any comments or notes..."
+              placeholderTextColor="#9ca3af"
+              editable={!uploading}
+              textAlignVertical="top"
+            />
+          </ScrollView>
+
+          <View style={styles.regUploadFooterBar}>
+            <TouchableOpacity style={styles.regUploadCancelBtn} onPress={onClose} disabled={uploading}>
+              <Text style={styles.regUploadCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.regUploadSubmitBtn, uploading && { opacity: 0.6 }]}
+              onPress={handleUpload}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
+              )}
+              <Text style={styles.regUploadSubmitText}>{uploading ? 'Uploading...' : 'Upload Documents'}</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────
 // ViewRegistrationModal
 // FIX: Modal always mounts; content guarded with {registration && ...}
@@ -413,12 +920,16 @@ const ViewRegistrationModal = ({ visible, onClose, registration }: any) => {
                 <SectionCard title="Registration Information" icon="solar-power">
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Reg. Status</Text>
-                    <StatusChip
+                <StatusChip
                       label={getRegStatusConfig(registration.registrationStatus).label}
                       color={getRegStatusConfig(registration.registrationStatus).color}
                       icon={getRegStatusConfig(registration.registrationStatus).icon}
                     />
                   </View>
+                  <InfoRow
+                    label="Registration Doc"
+                    value={registration.uploadDocument?.url ? 'Uploaded' : 'Not uploaded'}
+                  />
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Lead Status</Text>
                     <StatusChip
@@ -984,6 +1495,7 @@ export default function RegistrationScreen({
   const [selectedReg, setSelectedReg] = useState<any>(null);
   const [viewOpen,    setViewOpen]    = useState(false);
   const [editOpen,    setEditOpen]    = useState(false);
+  const [uploadOpen,  setUploadOpen]  = useState(false);
 
   const [toast, setToast] = useState({ message: '', severity: 'success', visible: false });
   const showToast = useCallback((message: string, severity = 'success') => {
@@ -1067,6 +1579,11 @@ export default function RegistrationScreen({
     setEditOpen(true);
   }, []);
 
+  const handleOpenUpload = useCallback((r: any) => {
+    setSelectedReg(r);
+    setUploadOpen(true);
+  }, []);
+
   // ── FIX: on close, do NOT reset selectedReg to null immediately.
   //    The slide-out animation takes ~300 ms; resetting to null
   //    during that window causes the modal content to flash blank.
@@ -1074,6 +1591,7 @@ export default function RegistrationScreen({
   //    last value until the next open overwrites it.
   const handleCloseView = useCallback(() => setViewOpen(false), []);
   const handleCloseEdit = useCallback(() => setEditOpen(false), []);
+  const handleCloseUpload = useCallback(() => setUploadOpen(false), []);
 
   const filtered = useMemo(() => {
     let list = [...registrations];
@@ -1232,7 +1750,7 @@ export default function RegistrationScreen({
                 permissions={permissions}
                 onView={handleOpenView}
                 onEdit={handleOpenEdit}
-                onUpload={() => showToast('Upload feature coming soon', 'success')}
+                onUpload={handleOpenUpload}
               />
             ))}
           </View>
@@ -1283,6 +1801,17 @@ export default function RegistrationScreen({
         registration={selectedReg}
         showToast={showToast}
         onSave={handleSave}
+      />
+
+      <RegistrationUploadModal
+        visible={uploadOpen}
+        onClose={handleCloseUpload}
+        registration={selectedReg}
+        showToast={showToast}
+        onUploaded={async (updated: any) => {
+          handleSave(updated);
+          await fetchData();
+        }}
       />
 
       <FilterDrawer
@@ -1396,6 +1925,380 @@ const styles = StyleSheet.create({
   viewModalName:   { fontSize: 16, fontWeight: '700', color: WHITE },
   viewModalId:     { fontSize: 11, color: rgba(WHITE, 0.85), marginTop: 2 },
   closeBtn:        { width: 30, height: 30, borderRadius: 15, backgroundColor: rgba(WHITE, 0.2), alignItems: 'center', justifyContent: 'center' },
+  uploadOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+  uploadSheet: {
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    height: '86%',
+  },
+  uploadHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+  uploadHeaderIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: rgba(PRIMARY, 0.1),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
+  uploadSubtitle: { fontSize: 12, color: '#777', marginTop: 2 },
+  uploadBody: { flex: 1 },
+  uploadBodyContent: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 16 },
+  uploadLabel: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 8 },
+  uploadSelect: {
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.35),
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: WHITE,
+  },
+  uploadSelectLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  uploadSelectText: { fontSize: 15, color: '#222', fontWeight: '500' },
+  uploadOptions: {
+    marginTop: 6,
+    maxHeight: 260,
+    borderRadius: 16,
+    backgroundColor: WHITE,
+    borderWidth: 1,
+    borderColor: rgba(PRIMARY, 0.12),
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    overflow: 'hidden',
+  },
+  uploadOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: WHITE,
+  },
+  uploadOptionRowActive: { backgroundColor: '#f3f6ff' },
+  uploadOptionText: { fontSize: 15, color: '#222' },
+  uploadDropzone: {
+    marginTop: 18,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#d8dbe3',
+    borderRadius: 22,
+    minHeight: 210,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 24,
+  },
+  uploadDropzoneTitle: {
+    marginTop: 12,
+    fontSize: 15,
+    color: '#222',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  uploadDropzoneSub: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#777',
+    textAlign: 'center',
+  },
+  uploadFooter: {
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 22 : 18,
+    gap: 12,
+  },
+  uploadCancelBtn: {
+    borderWidth: 1.5,
+    borderColor: PRIMARY,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+  },
+  uploadCancelText: { color: PRIMARY, fontSize: 15, fontWeight: '700' },
+  uploadSubmitBtn: {
+    backgroundColor: '#f58c27',
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+  },
+  uploadSubmitBtnDisabled: { opacity: 0.55 },
+  uploadSubmitText: { color: WHITE, fontSize: 15, fontWeight: '700' },
+  regProgressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
+  },
+  regProgressFill: {
+    height: '100%',
+    backgroundColor: PRIMARY,
+    borderRadius: 999,
+  },
+  regSelectTrigger: {
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.25),
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: WHITE,
+  },
+  regSelectTriggerText: {
+    fontSize: 14,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
+  regPlaceholderText: {
+    color: '#9ca3af',
+  },
+  regSelectOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  regSelectPanel: {
+    maxHeight: 320,
+    backgroundColor: WHITE,
+    borderRadius: 18,
+    paddingVertical: 8,
+  },
+  regSelectOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  regSelectOptionActive: {
+    backgroundColor: '#f3f6ff',
+  },
+  regSelectOptionText: {
+    fontSize: 14,
+    color: '#1f2937',
+  },
+  regSelectOptionTextActive: {
+    color: PRIMARY,
+    fontWeight: '700',
+  },
+  regUploadFieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4b5563',
+    marginBottom: 8,
+  },
+  regUploadFileBox: {
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.18),
+    borderRadius: 16,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: WHITE,
+  },
+  regUploadThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+  },
+  regUploadFileName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  regUploadFileMeta: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  regUploadDrop: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#d1d5db',
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fbfdff',
+  },
+  regUploadDropText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  regUploadDropHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+  },
+  regUploadErrorBorder: {
+    borderColor: ERROR,
+  },
+  regUploadErrorText: {
+    fontSize: 11,
+    color: ERROR,
+    marginTop: 4,
+  },
+  regUploadHeaderBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  regUploadHeaderIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: rgba(PRIMARY, 0.12),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  regUploadHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  regUploadHeaderSub: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  regUploadProgressText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 6,
+  },
+  regUploadDateRow: {
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.25),
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: WHITE,
+  },
+  regUploadDateText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: '#1f2937',
+  },
+  regUploadSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 12,
+  },
+  regOtherDocItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: rgba(PRIMARY, 0.12),
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    backgroundColor: WHITE,
+  },
+  regOtherDocName: {
+    flex: 1,
+    marginHorizontal: 10,
+    fontSize: 13,
+    color: '#1f2937',
+  },
+  regAddMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.25),
+    borderRadius: 14,
+    paddingVertical: 12,
+    backgroundColor: '#f8fbff',
+  },
+  regAddMoreText: {
+    color: PRIMARY,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  regUploadNotesInput: {
+    borderWidth: 1.5,
+    borderColor: rgba(PRIMARY, 0.18),
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 13,
+    color: '#111827',
+    minHeight: 110,
+    backgroundColor: WHITE,
+  },
+  regUploadFooterBar: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 16,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  regUploadCancelBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: PRIMARY,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  regUploadCancelText: {
+    color: PRIMARY,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  regUploadSubmitBtn: {
+    flex: 1,
+    backgroundColor: PRIMARY,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+  },
+  regUploadSubmitText: {
+    color: WHITE,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   editModalHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: BORDER, paddingTop: Platform.OS === 'ios' ? 50 : 16, backgroundColor: rgba(PRIMARY, 0.04) },
   editModalIcon:   { width: 44, height: 44, borderRadius: 10, backgroundColor: rgba(PRIMARY, 0.12), alignItems: 'center', justifyContent: 'center' },
   editModalTitle:  { fontSize: 16, fontWeight: '700', color: '#1a1a3e' },

@@ -28,6 +28,7 @@ import {
   Animated,
   StatusBar,
   KeyboardAvoidingView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
@@ -446,7 +447,20 @@ const ViewLeadModal = ({
 }) => {
   const [activeTab, setActiveTab] = useState(0);
   if (!lead) return null;
-  const tabs = ['Disbursement', 'Customer', 'Notes'];
+  const tabs = ['Disbursement', 'Customer', 'Documents', 'Notes'];
+  const docs = [
+    { title: 'Registration Doc', url: lead.uploadDocument?.url, iconName: 'description' },
+    { title: 'Aadhaar Card', url: lead.aadhaar?.url, iconName: 'badge' },
+    { title: 'PAN Card', url: lead.panCard?.url, iconName: 'credit-card' },
+    { title: 'Bank Passbook', url: lead.passbook?.url, iconName: 'receipt-long' },
+    { title: 'Installation Doc', url: lead.installationDocument?.url, iconName: 'construction' },
+    ...(lead.otherDocuments?.map((d: any, i: number) => ({
+      title: d.name || `Other Doc ${i + 1}`, url: d.url, iconName: 'insert-drive-file',
+    })) || []),
+    ...(lead.enhancementDocuments?.map((d: any, i: number) => ({
+      title: d.name || `Enhancement Doc ${i + 1}`, url: d.url, iconName: 'bolt',
+    })) || []),
+  ].filter((d: any) => d.url);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -537,8 +551,32 @@ const ViewLeadModal = ({
             </View>
           )}
 
-          {/* Notes Tab */}
           {activeTab === 2 && (
+            <View style={styles.infoCard}>
+              <SectionHeader title="All Documents" icon="folder-open" />
+              {docs.length > 0 ? docs.map((doc: any, i: number) => (
+                <View key={i}>
+                  <View style={[styles.infoRow, { alignItems: 'center' }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                      <MaterialIcons name={doc.iconName} size={18} color={PRIMARY_COLOR} />
+                      <Text style={{ marginLeft: 10, color: '#111827', fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                        {doc.title}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => Linking.openURL(doc.url)}>
+                      <Text style={{ color: PRIMARY_COLOR, fontWeight: '700' }}>View</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {i < docs.length - 1 && <View style={styles.divider} />}
+                </View>
+              )) : (
+                <Text style={styles.notesText}>No documents uploaded</Text>
+              )}
+            </View>
+          )}
+
+          {/* Notes Tab */}
+          {activeTab === 3 && (
             <View style={styles.infoCard}>
               <SectionHeader title="Disbursement Notes" icon="note" />
               <Text style={styles.notesText}>

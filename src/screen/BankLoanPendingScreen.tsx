@@ -30,6 +30,7 @@ import {
   StatusBar,
   RefreshControl,
   KeyboardAvoidingView,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "react-native-vector-icons/MaterialIcons";
@@ -454,8 +455,23 @@ const ViewLeadModal = ({ visible, onClose, lead }:
   const TABS = [
     { label:"Bank Info",  iconName:"account-balance"  },
     { label:"Customer",   iconName:"person"            },
+    { label:"Documents",  iconName:"folder-open"       },
     { label:"Notes",      iconName:"notes"             },
   ];
+
+  const docs = [
+    { title: 'Registration Doc', url: lead.uploadDocument?.url, iconName: 'description' },
+    { title: 'Aadhaar Card', url: lead.aadhaar?.url, iconName: 'badge' },
+    { title: 'PAN Card', url: lead.panCard?.url, iconName: 'credit-card' },
+    { title: 'Bank Passbook', url: lead.passbook?.url, iconName: 'receipt-long' },
+    { title: 'Installation Doc', url: lead.installationDocument?.url, iconName: 'construction' },
+    ...(lead.otherDocuments?.map((d:any, i:number) => ({
+      title: d.name || `Other Doc ${i + 1}`, url: d.url, iconName: 'insert-drive-file',
+    })) || []),
+    ...(lead.enhancementDocuments?.map((d:any, i:number) => ({
+      title: d.name || `Enhancement Doc ${i + 1}`, url: d.url, iconName: 'bolt',
+    })) || []),
+  ].filter((d:any) => d.url);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -537,6 +553,30 @@ const ViewLeadModal = ({ visible, onClose, lead }:
           )}
 
           {tab===2 && (
+            <View>
+              <View style={vm.cardTitle}>
+                <Icon name="folder-open" size={17} color={PRIMARY_COLOR} />
+                <Text style={vm.cardTitleTxt}>All Documents</Text>
+              </View>
+              {docs.length > 0 ? docs.map((doc:any, i:number) => (
+                <View key={i} style={[vm.card, { flexDirection:'row', alignItems:'center', marginBottom:10 }]}>
+                  <Icon name={doc.iconName} size={20} color={PRIMARY_COLOR} />
+                  <Text style={{ flex:1, marginLeft:10, color:'#1f2937', fontWeight:'600' }} numberOfLines={1}>
+                    {doc.title}
+                  </Text>
+                  <TouchableOpacity onPress={() => Linking.openURL(doc.url)}>
+                    <Text style={{ color: PRIMARY_COLOR, fontWeight:'700' }}>View</Text>
+                  </TouchableOpacity>
+                </View>
+              )) : (
+                <View style={vm.card}>
+                  <Text style={vm.notesEmpty}>No documents uploaded</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {tab===3 && (
             <View style={vm.card}>
               <View style={vm.cardTitle}>
                 <Icon name="notes" size={17} color={PRIMARY_COLOR} />
