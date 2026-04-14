@@ -5,9 +5,12 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFreshLocation } from '../hooks/useGeo';
 
 const TRACKING_INTERVAL_MS = 30_000;
+const OFFLINE_TRACKING_QUEUE_KEY = 'attendance_tracking_offline_queue_v1';
+const MAX_QUEUED_POINTS = 1000;
 
 type FetchAPI = (endpoint: string, options?: any) => Promise<any>;
 type TrackingConfig = {
@@ -29,12 +32,20 @@ type BatteryInfo = {
   isCharging: boolean;
   deviceInfo?: string;
 };
+type TrackingPoint = {
+  lat: number;
+  lng: number;
+  accuracy?: number | null;
+  speed?: number | null;
+  time?: string;
+};
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let active = false;
 let inFlight = false;
 let currentFetchAPI: FetchAPI | null = null;
 let nativeServiceRunning = false;
+let queueFlushInFlight = false;
 let lastPostedPoint: {
   lat: number;
   lng: number;
@@ -88,6 +99,90 @@ const shouldSkipPoint = (lat: number, lng: number, recordedAt: number) => {
 
 const rememberPostedPoint = (lat: number, lng: number, recordedAt: number) => {
   lastPostedPoint = { lat, lng, recordedAt };
+};
+
+const normalizeQueuedPoint = (point: TrackingPoint): TrackingPoint | null => {
+  if (!isValidCoordinate(point?.lat, point?.lng)) return null;
+
+  return {
+    lat: Number(point.lat),
+    lng: Number(point.lng),
+    accuracy: Number(point.accuracy ?? 0),
+    speed: Number(point.speed ?? 0),
+    time: point.time || new Date().toISOString(),
+  };
+};
+
+const readQueuedPoints = async (): Promise<TrackingPoint[]> => {
+  try {
+    const raw = await AsyncStorage.getItem(OFFLINE_TRACKING_QUEUE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeQueuedPoint)
+      .filter((point): point is TrackingPoint => !!point);
+  } catch (error) {
+    console.warn('Failed to read queued tracking points:', error);
+    return [];
+  }
+};
+
+const writeQueuedPoints = async (points: TrackingPoint[]) => {
+  const trimmed = points.slice(-MAX_QUEUED_POINTS);
+  await AsyncStorage.setItem(OFFLINE_TRACKING_QUEUE_KEY, JSON.stringify(trimmed));
+};
+
+const queueTrackingPoint = async (point: TrackingPoint) => {
+  const normalized = normalizeQueuedPoint(point);
+  if (!normalized) return;
+
+  const current = await readQueuedPoints();
+  const lastQueued = current[current.length - 1];
+  if (
+    lastQueued &&
+    lastQueued.time === normalized.time &&
+    Math.abs(lastQueued.lat - normalized.lat) < 0.000001 &&
+    Math.abs(lastQueued.lng - normalized.lng) < 0.000001
+  ) {
+    return;
+  }
+
+  current.push(normalized);
+  await writeQueuedPoints(current);
+};
+
+const flushQueuedTrackingPoints = async (api: FetchAPI) => {
+  if (queueFlushInFlight) return;
+
+  queueFlushInFlight = true;
+  try {
+    const queued = await readQueuedPoints();
+    if (!queued.length) return;
+
+    const sorted = [...queued].sort((a, b) => {
+      const ta = a.time ? new Date(a.time).getTime() : 0;
+      const tb = b.time ? new Date(b.time).getTime() : 0;
+      return ta - tb;
+    });
+
+    await api('/location/track/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ points: sorted }),
+    });
+
+    await AsyncStorage.removeItem(OFFLINE_TRACKING_QUEUE_KEY);
+
+    const lastPoint = sorted[sorted.length - 1];
+    if (lastPoint) {
+      const recordedAt = lastPoint.time ? new Date(lastPoint.time).getTime() : Date.now();
+      rememberPostedPoint(lastPoint.lat, lastPoint.lng, recordedAt);
+    }
+  } finally {
+    queueFlushInFlight = false;
+  }
 };
 
 const getBatteryInfo = async (): Promise<BatteryInfo | null> => {
@@ -184,34 +279,20 @@ const hasAndroidBackgroundTrackingPermissions = async (): Promise<boolean> => {
 
 const postTrackingPoint = async (
   api: FetchAPI,
-  point: {
-    lat: number;
-    lng: number;
-    accuracy?: number | null;
-    speed?: number | null;
-    time?: string;
-  },
+  point: TrackingPoint,
 ) => {
-  const recordedAt = point.time ? new Date(point.time).getTime() : Date.now();
+  const normalizedPoint = normalizeQueuedPoint(point);
+  if (!normalizedPoint) return;
 
-  if (shouldSkipPoint(point.lat, point.lng, recordedAt)) {
+  const recordedAt = normalizedPoint.time ? new Date(normalizedPoint.time).getTime() : Date.now();
+
+  if (shouldSkipPoint(normalizedPoint.lat, normalizedPoint.lng, recordedAt)) {
+    await flushQueuedTrackingPoints(api);
     return;
   }
 
-  await api('/location/track/bulk', {
-    method: 'POST',
-    body: JSON.stringify({
-      points: [{
-        lat: point.lat,
-        lng: point.lng,
-        accuracy: point.accuracy ?? 0,
-        speed: point.speed ?? 0,
-        time: point.time ?? new Date(recordedAt).toISOString(),
-      }],
-    }),
-  });
-
-  rememberPostedPoint(point.lat, point.lng, recordedAt);
+  await queueTrackingPoint(normalizedPoint);
+  await flushQueuedTrackingPoints(api);
 };
 
 const sendTrackingPoint = async (pointOverride?: StartTrackingOptions['initialPoint']) => {

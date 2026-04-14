@@ -330,12 +330,12 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
             <View style={styles.logoSection}>
               <Animated.View style={[styles.logoCircle, { transform: [{ scale: pulseAnim }] }]}>
                 <Image
-  source={require('../../assets/Images/logo192.png')}
-  style={{ width: 50, height: 50 }}
-/>
+                  source={require('../../assets/branding/solar_crm_icon_square.png')}
+                  style={{ width: 64, height: 64 }}
+                />
               </Animated.View>
-              <Text style={styles.appTitle}>Solar Management System</Text>
-              <Text style={styles.appSubtitle}>SunergyTech</Text>
+              <Text style={styles.appTitle}>Solar CRM</Text>
+              <Text style={styles.appSubtitle}>Sales & Service Portal</Text>
             </View>
 
             {/* ── Success alert ── */}
@@ -492,7 +492,7 @@ const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
             {/* ── Footer ── */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>
-                © {new Date().getFullYear()} SunergyTech Solar Management System
+                © {new Date().getFullYear()} Solar CRM
               </Text>
               <Text style={styles.versionText}>
                 Version 2.1.0 • {new Date().toLocaleDateString()}

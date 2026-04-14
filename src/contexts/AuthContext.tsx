@@ -33,7 +33,7 @@ const Storage = AsyncStorage;
    CONTEXT SETUP
 ───────────────────────────────────────────────────────────── */
 const AuthContext = createContext<any>({});
-const API_BASE_URL = 'https://solar-backend-1-4szm.onrender.com/api/v1';
+const API_BASE_URL = 'https://vanurtech-solar-backend.onrender.com/api/v1';
 const API_TIMEOUT_MS = 45_000;
 const APP_ALLOWED_ROLE = 'TEAM';
 

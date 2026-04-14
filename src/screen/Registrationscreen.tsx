@@ -622,6 +622,16 @@ const RegistrationUploadModal = ({
       !!form.passbook.file ||
       form.otherDocuments.some((d: any) => !!d.file);
     const hasRegistrationFile = !!form.registrationDocument.file;
+    const normalizedCurrentDate = form.documentSubmissionDate
+      ? new Date(form.documentSubmissionDate).toISOString().split('T')[0]
+      : '';
+    const normalizedExistingDate = registration?.documentSubmissionDate
+      ? new Date(registration.documentSubmissionDate).toISOString().split('T')[0]
+      : '';
+    const hasDocumentMetaChanges =
+      (form.documentStatus || '') !== (registration?.documentStatus || '') ||
+      (form.documentNotes || '').trim() !== (registration?.documentNotes || '').trim() ||
+      normalizedCurrentDate !== normalizedExistingDate;
 
     if (!hasGeneralFiles && !hasRegistrationFile) {
       showToast('Please select at least one document to upload', 'error');
@@ -661,7 +671,7 @@ const RegistrationUploadModal = ({
         latestResult = regRes.result || latestResult;
       }
 
-      if (hasGeneralFiles || form.documentNotes || form.documentSubmissionDate || form.documentStatus) {
+      if (hasGeneralFiles || hasDocumentMetaChanges) {
         const fd = new FormData();
         const jsonData: any = {};
         if (form.documentNotes) jsonData.documentNotes = form.documentNotes;

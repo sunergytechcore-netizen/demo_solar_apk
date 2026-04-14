@@ -70,6 +70,8 @@ class BackgroundLocationService : Service() {
       ACTION_START -> {
         apiBaseUrl = intent.getStringExtra(EXTRA_API_BASE_URL)?.trimEnd('/')
         token = intent.getStringExtra(EXTRA_TOKEN)
+        runCatching { flushQueuedLocationPoints() }
+          .onFailure { Log.w(TAG, "Failed to flush queued points on start", it) }
         runCatching { startLocationUpdates() }
           .onFailure {
             Log.e(TAG, "Unable to start location updates", it)
@@ -159,30 +161,16 @@ class BackgroundLocationService : Service() {
     updateNotification(location)
 
     executor.execute {
-      runCatching { postLocationPoint(location) }
+      runCatching { queueAndFlushLocationPoint(location) }
         .onFailure { Log.e(TAG, "Location upload failed", it) }
       runCatching { postBatteryStatus() }
         .onFailure { Log.e(TAG, "Battery upload failed", it) }
     }
   }
 
-  private fun postLocationPoint(location: Location) {
-    val payload = JSONObject().apply {
-      put(
-        "points",
-        JSONArray().put(
-          JSONObject().apply {
-            put("lat", location.latitude)
-            put("lng", location.longitude)
-            put("accuracy", location.accuracy.toDouble())
-            put("speed", location.speed.toDouble())
-            put("time", isoNow())
-          }
-        )
-      )
-    }
-
-    postJson("/location/track/bulk", payload)
+  private fun queueAndFlushLocationPoint(location: Location) {
+    enqueueLocationPoint(location)
+    flushQueuedLocationPoints()
   }
 
   private fun postBatteryStatus() {
@@ -207,9 +195,9 @@ class BackgroundLocationService : Service() {
     postJson("/battery/log", payload)
   }
 
-  private fun postJson(path: String, payload: JSONObject) {
-    val baseUrl = apiBaseUrl ?: return
-    val bearerToken = token ?: return
+  private fun postJson(path: String, payload: JSONObject): Boolean {
+    val baseUrl = apiBaseUrl ?: return false
+    val bearerToken = token ?: return false
 
     var connection: HttpURLConnection? = null
     try {
@@ -230,11 +218,73 @@ class BackgroundLocationService : Service() {
       val code = connection.responseCode
       if (code !in 200..299) {
         Log.w(TAG, "Upload failed for $path with HTTP $code")
+        return false
       }
+      return true
     } catch (error: Exception) {
       Log.e(TAG, "Upload failed for $path", error)
+      return false
     } finally {
       connection?.disconnect()
+    }
+  }
+
+  private fun getQueuePrefs() =
+    getSharedPreferences(QUEUE_PREFS_NAME, Context.MODE_PRIVATE)
+
+  private fun readQueuedPoints(): JSONArray {
+    val raw = getQueuePrefs().getString(QUEUE_KEY, null) ?: return JSONArray()
+    return runCatching { JSONArray(raw) }.getOrElse { JSONArray() }
+  }
+
+  private fun writeQueuedPoints(points: JSONArray) {
+    getQueuePrefs().edit().putString(QUEUE_KEY, points.toString()).apply()
+  }
+
+  private fun enqueueLocationPoint(location: Location) {
+    val queue = readQueuedPoints()
+    val point = JSONObject().apply {
+      put("lat", location.latitude)
+      put("lng", location.longitude)
+      put("accuracy", location.accuracy.toDouble())
+      put("speed", location.speed.toDouble())
+      put("time", isoNow())
+    }
+
+    val lastQueued = if (queue.length() > 0) queue.optJSONObject(queue.length() - 1) else null
+    val sameAsLast =
+      lastQueued != null &&
+        kotlin.math.abs(lastQueued.optDouble("lat") - point.optDouble("lat")) < 0.000001 &&
+        kotlin.math.abs(lastQueued.optDouble("lng") - point.optDouble("lng")) < 0.000001 &&
+        lastQueued.optString("time") == point.optString("time")
+
+    if (!sameAsLast) {
+      queue.put(point)
+    }
+
+    if (queue.length() > MAX_QUEUED_POINTS) {
+      val trimmed = JSONArray()
+      for (i in maxOf(0, queue.length() - MAX_QUEUED_POINTS) until queue.length()) {
+        trimmed.put(queue.getJSONObject(i))
+      }
+      writeQueuedPoints(trimmed)
+      return
+    }
+
+    writeQueuedPoints(queue)
+  }
+
+  private fun flushQueuedLocationPoints() {
+    val queue = readQueuedPoints()
+    if (queue.length() == 0) return
+
+    val payload = JSONObject().apply {
+      put("points", queue)
+    }
+
+    val uploaded = postJson("/location/track/bulk", payload)
+    if (uploaded) {
+      getQueuePrefs().edit().remove(QUEUE_KEY).apply()
     }
   }
 
@@ -304,5 +354,8 @@ class BackgroundLocationService : Service() {
     private const val UPDATE_INTERVAL_MS = 30_000L
     private const val MIN_DISTANCE_METERS = 5f
     private const val MAX_ACCEPTABLE_ACCURACY_METERS = 150f
+    private const val QUEUE_PREFS_NAME = "attendance_tracking_queue"
+    private const val QUEUE_KEY = "pending_points"
+    private const val MAX_QUEUED_POINTS = 1000
   }
 }

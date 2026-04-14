@@ -352,13 +352,18 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
       const visitJson = await fetchAPI('/visit', { method:'POST', body:fd });
       const visitResult = visitJson?.result ?? visitJson?.data ?? visitJson;
       const visitData = visitResult?.visit ?? visitResult;
-      const createdLead = visitResult?.lead ?? null;
+      const createdLead = visitResult?.lead ?? visitData?.leadCreated ?? null;
+      const createdLeadId =
+        createdLead?._id ||
+        (typeof createdLead === 'string' ? createdLead : null) ||
+        visitData?.leadCreated?._id ||
+        (typeof visitData?.leadCreated === 'string' ? visitData.leadCreated : null);
 
       if (!visitData?._id) {
         throw new Error(visitJson?.message || visitResult?.message || 'Visit was created, but the app could not read the response');
       }
 
-      if ((isLeadCreated === 'yes' || isLeadCreated === 'no') && !createdLead?._id) {
+      if (isLeadCreated === 'yes' && !createdLeadId) {
         throw new Error('Visit was saved, but lead was not created. Please check backend lead creation.');
       }
 
@@ -592,7 +597,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
           {(isLeadCreated==='yes' || isLeadCreated==='no') && (
             <SectionCard>
               <SectionTitle icon="account" label="Contact Information"
-                badge={isLeadCreated==='other' ? 'Visit Only' : 'Lead Created'}
+                badge={isLeadCreated==='yes' ? 'Lead Created' : 'Visit Contact'}
                 badgeColor="success" />
               <View style={{ position:'relative' }}>
                 <View style={s.inputWrap}>
