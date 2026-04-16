@@ -237,6 +237,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
   const [formData, setFormData] = useState<FormData>({
     locationName:'', remarks:'', contactPerson:'', phone:'', email:'',
   });
+  const leadOptionCreatesLead = true;
 
   const showSnack = useCallback((msg: string, type: any = 'success') => {
     setSnack({ msg, type });
@@ -288,7 +289,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
   const handleCameraCapture = useCallback(async () => {
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, {
-        title:'Camera Permission', message:'Required to take a site photo.',
+        title:'Camera Permission', message:'Needed only if you want to attach a site photo.',
         buttonPositive:'Allow', buttonNegative:'Deny',
       });
       if (granted !== PermissionsAndroid.RESULTS.GRANTED) { showSnack('Camera permission denied.', 'error'); return; }
@@ -319,15 +320,19 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
   // ── Validation ────────────────────────────────────────────────────────────
   const validate = (): boolean => {
     const errors: any = {};
-    if (!imageData)                    errors.photo        = 'Please capture a photo';
     if (!formData.locationName.trim()) errors.locationName = 'Location name is required';
     if (latitude === null || longitude === null) errors.location = 'Location coordinates are required';
-    if (isLeadCreated === 'yes' || isLeadCreated === 'no') {
-      if (!formData.contactPerson.trim()) errors.contactPerson = 'Contact person is required';
+    if (leadOptionCreatesLead) {
+      if (
+        !formData.contactPerson.trim() &&
+        !formData.phone.trim() &&
+        !formData.email.trim()
+      ) {
+        errors.contactPerson = 'Enter at least one contact detail';
+      }
       if (formData.phone && !/^[0-9+\-\s()]{10,15}$/.test(formData.phone)) errors.phone = 'Enter a valid phone number';
       if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errors.email = 'Enter a valid email';
     }
-    if (isLeadCreated === 'other' && !formData.remarks.trim()) errors.remarks = 'Please enter a description for this visit';
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -347,7 +352,9 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
       if (formData.contactPerson.trim()) fd.append('contactPerson', formData.contactPerson.trim());
       if (formData.phone.trim())         fd.append('phone',         formData.phone.trim());
       if (formData.email.trim())         fd.append('email',         formData.email.trim());
-      fd.append('photos', { uri:imageData!.uri, type:imageData!.type, name:imageData!.name } as any);
+      if (imageData) {
+        fd.append('photos', { uri:imageData.uri, type:imageData.type, name:imageData.name } as any);
+      }
 
       const visitJson = await fetchAPI('/visit', { method:'POST', body:fd });
       const visitResult = visitJson?.result ?? visitJson?.data ?? visitJson;
@@ -363,7 +370,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
         throw new Error(visitJson?.message || visitResult?.message || 'Visit was created, but the app could not read the response');
       }
 
-      if (isLeadCreated === 'yes' && !createdLeadId) {
+      if (leadOptionCreatesLead && !createdLeadId) {
         throw new Error('Visit was saved, but lead was not created. Please check backend lead creation.');
       }
 
@@ -383,15 +390,17 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
 
   // latitude/longitude come from useGeo; both must be non-null to enable submit
   const hasCoords = latitude !== null && longitude !== null;
-  const requiresContact = isLeadCreated === 'yes' || isLeadCreated === 'no';
-  const requiresRemarks = isLeadCreated === 'other';
+  const requiresContact = true;
   const canSubmit  =
     !loading &&
     hasCoords &&
-    !!imageData &&
     !!formData.locationName.trim() &&
-    (!requiresContact || !!formData.contactPerson.trim()) &&
-    (!requiresRemarks || !!formData.remarks.trim());
+    (
+      !requiresContact ||
+      !!formData.contactPerson.trim() ||
+      !!formData.phone.trim() ||
+      !!formData.email.trim()
+    );
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -434,8 +443,8 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
 
           {/* ── Camera ── */}
           <SectionCard>
-            <SectionTitle icon="camera" label="Site Photo"
-              badge={imageData ? 'Captured' : 'Required'}
+              <SectionTitle icon="camera" label="Site Photo"
+                badge={imageData ? 'Captured' : 'Optional'}
               badgeColor={imageData ? 'success' : 'error'} />
             {preview ? (
               <View style={s.previewWrap}>
@@ -455,7 +464,7 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
               <TouchableOpacity style={s.uploadArea} onPress={handleCameraCapture} activeOpacity={0.8}>
                 <MaterialCommunityIcons name="camera-plus" size={48} color={rgba(PRIMARY,0.5)} />
                 <Text style={s.uploadTitle}>Tap to open camera</Text>
-                <Text style={s.uploadSub}>Take a photo of the site · Max 10 MB</Text>
+                    <Text style={s.uploadSub}>Optional site photo · Max 10 MB</Text>
                 <View style={s.uploadBtn}>
                   <MaterialCommunityIcons name="camera" size={16} color="#fff" />
                   <Text style={s.uploadBtnTxt}>Open Camera</Text>
@@ -597,11 +606,11 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
           {(isLeadCreated==='yes' || isLeadCreated==='no') && (
             <SectionCard>
               <SectionTitle icon="account" label="Contact Information"
-                badge={isLeadCreated==='yes' ? 'Lead Created' : 'Visit Contact'}
+                badge="Visit + Lead"
                 badgeColor="success" />
               <View style={{ position:'relative' }}>
                 <View style={s.inputWrap}>
-                  <Text style={s.inputLabel}>Contact Person *</Text>
+                  <Text style={s.inputLabel}>Contact Person</Text>
                   <View style={[s.inputRow, validationErrors.contactPerson && s.inputRowError]}>
                     <MaterialCommunityIcons name="account" size={18} color={rgba(PRIMARY,0.5)} style={{ marginRight:8 }} />
                     <TextInput
@@ -650,10 +659,10 @@ const CreateVisitScreen: React.FC<Props> = ({ onClose, onSave, onBackPress }) =>
           <SectionCard>
             <SectionTitle icon="note-text"
               label={isLeadCreated==='other' ? 'Description' : 'Visit Notes'}
-              badge={isLeadCreated==='other' ? (formData.remarks.trim() ? 'Filled' : 'Required') : undefined}
+                    badge={isLeadCreated==='other' ? (formData.remarks.trim() ? 'Filled' : undefined) : undefined}
               badgeColor={formData.remarks.trim() ? 'success' : 'error'} />
             <InputField icon="text"
-              label={isLeadCreated==='other' ? 'Description *' : 'Notes (optional)'}
+                    label={isLeadCreated==='other' ? 'Description (optional)' : 'Notes (optional)'}
               value={formData.remarks} onChange={handleChange('remarks')}
               placeholder={isLeadCreated==='other' ? 'Enter a description of this visit…' : 'Enter any additional notes…'}
               error={validationErrors.remarks} multiline rows={4} disabled={loading} />
